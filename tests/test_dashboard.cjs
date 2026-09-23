@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const script = fs.readFileSync(path.join(__dirname, '../data/index.html'), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const script = fs.readFileSync(path.join(__dirname, '../data/dashboard.js'), 'utf8');
 const element = () => ({textContent: '', className: '', children: [], append(...children) {this.children.push(...children);}});
 const elements = Object.fromEntries(['inputs', 'outputs', 'ip', 'ethernet', 'mqtt', 'relays', 'connection', 'updated'].map(id => [id, element()]));
 const channels = Array.from({length: 8}, (_, i) => ({channel: i + 1, name: '', enabled: false, state: false}));

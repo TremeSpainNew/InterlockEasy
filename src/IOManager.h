@@ -13,11 +13,13 @@ public:
     void setOutput(uint8_t channel, bool state);
 
 private:
-    bool inputState[8] = {};
+    bool inputState[8] = {}; // Debounced physical levels; inversion is applied on access.
+    bool candidateState[8] = {};
+    uint32_t candidateSince[8] = {};
     bool outputState[8] = {};
     bool relayReady = false;
     uint8_t relayMask = 0;
-    unsigned long lastScan = 0;
+    uint32_t lastScan = 0;
 
     bool readInput(uint8_t channel);
     bool writeRelay(uint8_t channel, bool state);

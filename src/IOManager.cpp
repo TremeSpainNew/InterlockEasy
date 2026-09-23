@@ -14,6 +14,8 @@ void IOManager::begin() {
     for (int i = 0; i < 8; i++) {
         pinMode(INPUT_PINS[i], INPUT);
         inputState[i] = readInput(i);
+        candidateState[i] = inputState[i];
+        candidateSince[i] = uint32_t(millis());
         outputState[i] = false;
     }
 
@@ -35,31 +37,36 @@ void IOManager::begin() {
 }
 
 bool IOManager::readInput(uint8_t channel) {
-    bool value = digitalRead(INPUT_PINS[channel]);
-    if (Config.inputs[channel].inverted) value = !value;
-    return value;
+    return digitalRead(INPUT_PINS[channel]);
 }
 
 void IOManager::refreshInputs() {
-    for (uint8_t i = 0; i < 8; ++i) inputState[i] = readInput(i);
+    // Reconnection/configuration changes must not bypass the debounce filter.
+    loop();
 }
 
 void IOManager::loop() {
-    if (millis() - lastScan < 20) return;
-    lastScan = millis();
-
-    for (int i = 0; i < 8; i++) {
-        bool value = readInput(i);
-        if (value != inputState[i]) {
-            inputState[i] = value;
-            Serial.printf("DI%d = %d\n", i + 1, value);
-            MQTT.publishInput(i, value);
+    const uint32_t now = uint32_t(millis());
+    if (uint32_t(now - lastScan) < 5) return;
+    lastScan = now;
+    for (uint8_t i = 0; i < 8; ++i) {
+        const bool value = readInput(i);
+        if (value != candidateState[i]) {
+            candidateState[i] = value;
+            candidateSince[i] = now;
+        }
+        if (candidateState[i] != inputState[i] &&
+            uint32_t(now - candidateSince[i]) >= Config.inputs[i].debounceMs) {
+            inputState[i] = candidateState[i];
+            const bool logical = getInput(i);
+            Serial.printf("DI%d = %d\n", i + 1, logical);
+            MQTT.publishInput(i, logical);
         }
     }
 }
 
 bool IOManager::getInput(uint8_t channel) {
-    return channel < 8 ? inputState[channel] : false;
+    return channel < 8 ? inputState[channel] != Config.inputs[channel].inverted : false;
 }
 
 bool IOManager::getOutput(uint8_t channel) {

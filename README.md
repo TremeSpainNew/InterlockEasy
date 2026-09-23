@@ -108,7 +108,8 @@ Client ID MQTT inicial:
 ## Web y API de estado
 
 El servidor HTTP escucha en el puerto 80 de la IP Ethernet asignada por DHCP.
-Sirve `/` y `/index.html` desde LittleFS. La página consulta `GET /api/status`
+Sirve desde LittleFS el resumen (`/` y `/index.html`), las páginas de
+configuración y los recursos compartidos CSS/JS. El resumen consulta `GET /api/status`
 cada segundo, después de completar la petición anterior, y marca «Sin datos»
 si pierde la conexión. Muestra las ocho entradas, las ocho salidas, la IP,
 la conexión MQTT y la disponibilidad del controlador de relés.
@@ -144,7 +145,26 @@ no sustituyen la validación del W5500 y los relés en la placa.
 
 ## Configuración desde el navegador
 
-Pulsa **Cargar configuración**, edita el broker y despliega cada canal DI/RO.
+La navegación se divide en cinco páginas:
+
+- `/index.html`: resumen de conexiones, entradas, salidas y señales.
+- `/mqtt.html`: broker y credenciales.
+- `/inputs.html`: configuración de DI1–DI8, JSON, inversión y antirrebote.
+- `/outputs.html`: configuración de salidas independientes.
+- `/signals.html`: focos, relés, aspectos y parpadeo.
+
+Cada página de configuración carga sus ajustes automáticamente y permite
+**Recargar configuración**. Al guardar se consulta la configuración actual y se
+sustituye solo la sección editada, conservando las otras secciones. Guardar señales
+también deshabilita los mandos individuales de sus relés asignados. Dos clientes
+que editen simultáneamente la misma sección siguen sujetos al último guardado.
+
+Los recursos `style.css`, `dashboard.js` y `config.js` se sirven localmente, sin
+CDN. Las rutas están enumeradas explícitamente en el servidor; para instalar esta
+separación hay que actualizar **firmware y LittleFS**. Prueba de las páginas:
+`node tests/test_pages.cjs`.
+
+Edita el broker o despliega los canales en la página correspondiente.
 **Guardar y aplicar** valida y guarda en NVS una instantánea completa antes de
 cambiar la configuración activa. Los relés conservan su último estado; deshabilitar
 un canal deshabilita su uso por MQTT, no fuerza su salida a OFF.
@@ -215,6 +235,30 @@ La API añade `payloadJson` a ambos tipos de canal y `jsonPath`/`stateJson` a
 salidas. Los payloads siguen siendo cadenas dentro del JSON de configuración.
 
 Prueba local: `python3 tests/test_json_payload.py`.
+
+Las entradas están invertidas por defecto: nivel GPIO bajo = activa y alto =
+inactiva. Se puede cambiar **Invertir entrada** por canal. Los valores de inversión
+ya guardados en NVS se conservan al actualizar el firmware.
+
+## Antirrebote de entradas
+
+Cada DI tiene **Antirrebote (ms)** en el editor web: 50 ms por defecto,
+configurable entre 0 y 5000 ms; 0 desactiva el filtro. Se guarda en NVS mediante
+`inputs[].debounceMs`. Las configuraciones antiguas usan 50 ms.
+
+Se muestrean las entradas cada 5 ms cuando el bucle puede ejecutarse. Solo se
+acepta un nuevo estado tras observarlo estable durante el intervalo configurado,
+tanto al activar como al desactivar. Cada rebote reinicia la espera, de forma
+independiente por canal y sin `delay()`. MQTT y el dashboard usan el estado
+filtrado, también al reconectar. La inversión lógica se aplica después del filtro.
+
+La primera lectura al arrancar establece el estado inicial sin espera; los
+cambios posteriores se filtran. Pulsos inferiores al intervalo pueden descartarse.
+Los tiempos dependen del muestreo y pueden aumentar si una operación de red
+bloquea el bucle; no se detectan transiciones entre muestras.
+
+Prueba: `python3 tests/test_debounce.py` (rebotes en ambos sentidos, intervalos
+independientes, inversión, reconexión, filtro desactivado y desbordamiento del reloj).
 
 ## Señales de varios focos
 

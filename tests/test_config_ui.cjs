@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const scripts = [...fs.readFileSync(path.join(__dirname, '../data/index.html'),'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)];
+const scripts = [null, [null, fs.readFileSync(path.join(__dirname, '../data/config.js'), 'utf8')]];
 function element() {return {children:[], handlers:{}, value:'', checked:false, append(...items){this.children.push(...items);}, replaceChildren(){this.children=[];}, addEventListener(type, fn){this.handlers[type]=fn;}};}
 const elements = Object.fromEntries(['config-form','config-fields','config-message','load-config','save-config'].map(id => [id,element()]));
 const data = {mqtt:{host:'broker',port:1883,clientId:'test',username:'',keepAlive:30,passwordSet:true}, inputs:Array.from({length:8},()=>({enabled:false,name:'',topic:'',payloadOn:'1',payloadOff:'0',inverted:false,retain:true})), outputs:Array.from({length:8},()=>({enabled:false,name:'',commandTopic:'',payloadOn:'1',payloadOff:'0',publishState:true,stateTopic:'',stateOn:'1',stateOff:'0',retain:true}))};

@@ -30,7 +30,7 @@ void ConfigManager::load() {
         inputs[i].topic = prefs.getString((p + "t").c_str(), "");
         inputs[i].payloadOn = prefs.getString((p + "on").c_str(), "1");
         inputs[i].payloadOff = prefs.getString((p + "off").c_str(), "0");
-        inputs[i].inverted = prefs.getBool((p + "inv").c_str(), false);
+        inputs[i].inverted = prefs.getBool((p + "inv").c_str(), true);
         inputs[i].retain = prefs.getBool((p + "ret").c_str(), true);
     }
 
@@ -69,6 +69,7 @@ void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
         item["payloadOn"] = inputs[i].payloadOn;
         item["payloadOff"] = inputs[i].payloadOff;
         item["inverted"] = inputs[i].inverted;
+        item["debounceMs"] = inputs[i].debounceMs;
         item["retain"] = inputs[i].retain;
     }
     JsonArray outputsArray = doc.createNestedArray("outputs");
@@ -180,6 +181,12 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
         nextInputs[i].payloadOff = item["payloadOff"].as<String>();
         if (!item["inverted"].is<bool>()) return false;
         nextInputs[i].inverted = item["inverted"].as<bool>();
+        if (item.containsKey("debounceMs")) {
+            if (!item["debounceMs"].is<unsigned int>() || item["debounceMs"].as<unsigned int>() > 5000) {
+                error = "Antirrebote: debe estar entre 0 y 5000 ms."; return false;
+            }
+            nextInputs[i].debounceMs = item["debounceMs"].as<uint16_t>();
+        }
         if (!item["retain"].is<bool>()) return false;
         nextInputs[i].retain = item["retain"].as<bool>();
         auto& c = nextInputs[i];

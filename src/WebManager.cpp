@@ -156,14 +156,20 @@ void WebManager::dispatch() {
     if (path == "/api/config") { config(); return; }
     if (path == "/api/status") {
         status();
-    } else if (path == "/" || path == "/index.html") {
-        if (filesystemReady) file = LittleFS.open("/index.html", "r");
+    } else if (path == "/" || path == "/index.html" || path == "/mqtt.html" ||
+               path == "/inputs.html" || path == "/outputs.html" || path == "/signals.html" ||
+               path == "/style.css" || path == "/dashboard.js" || path == "/config.js") {
+        const String asset = path == "/" ? String("/index.html") : path;
+        if (filesystemReady) file = LittleFS.open(asset.c_str(), "r");
         if (!file) {
             respond(503, "Service Unavailable", "text/plain; charset=utf-8",
                     "Interfaz no disponible. Carga LittleFS con: pio run -t uploadfs. API: /api/status");
             return;
         }
-        headers(200, "OK", "text/html; charset=utf-8", file.size());
+        const char* type = path.endsWith(".css") ? "text/css; charset=utf-8" :
+                           path.endsWith(".js") ? "application/javascript; charset=utf-8" :
+                           "text/html; charset=utf-8";
+        headers(200, "OK", type, file.size());
     } else {
         respond(404, "Not Found", "text/plain", "Recurso no encontrado.");
     }

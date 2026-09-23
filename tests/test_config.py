@@ -49,6 +49,8 @@ int main() {
  DynamicJsonDocument d(32768);
  String error;
  Config.toJson(d);
+ assert(d["inputs"][0]["debounceMs"]==50);
+ d["inputs"][0]["debounceMs"]=75;
  assert(!d["mqtt"].containsKey("password"));
  d["mqtt"]["host"]="broker.local";
  d["mqtt"]["password"]="secret";
@@ -64,6 +66,10 @@ int main() {
  ConfigManager reboot;
  reboot.begin();
  assert(reboot.mqtt.host=="new.local" && reboot.mqtt.password=="secret");
+ assert(reboot.inputs[0].debounceMs==75);
+ d["inputs"][0]["debounceMs"]=5001;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ d["inputs"][0]["debounceMs"]=75;
  const auto saved=storage;
  d["mqtt"]["port"]=0;
  assert(!Config.applyJson(d.as<JsonVariantConst>(),error));

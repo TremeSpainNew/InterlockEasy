@@ -14,7 +14,8 @@ struct InputConfig {
     bool payloadJson = false;
     String payloadOn = "1";
     String payloadOff = "0";
-    bool inverted = false;
+    bool inverted = true;
+    uint16_t debounceMs = 50;
     bool retain = true;
 };
 
