@@ -1,0 +1,53 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const scripts = [...fs.readFileSync(path.join(__dirname, '../data/index.html'),'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)];
+function element() {return {children:[], handlers:{}, value:'', checked:false, append(...items){this.children.push(...items);}, replaceChildren(){this.children=[];}, addEventListener(type, fn){this.handlers[type]=fn;}};}
+const elements = Object.fromEntries(['config-form','config-fields','config-message','load-config','save-config'].map(id => [id,element()]));
+const data = {mqtt:{host:'broker',port:1883,clientId:'test',username:'',keepAlive:30,passwordSet:true}, inputs:Array.from({length:8},()=>({enabled:false,name:'',topic:'',payloadOn:'1',payloadOff:'0',inverted:false,retain:true})), outputs:Array.from({length:8},()=>({enabled:false,name:'',commandTopic:'',payloadOn:'1',payloadOff:'0',publishState:true,stateTopic:'',stateOn:'1',stateOff:'0',retain:true}))};
+let submitted;
+let reject = false;
+const context = vm.createContext({document:{getElementById:id=>elements[id], createElement:element},AbortController,setTimeout:()=>1,clearTimeout:()=>{},fetch:async(url,options)=>{
+ assert.equal(url,'/api/config');
+ if(options.method==='POST') {submitted=JSON.parse(options.body); assert.equal(options.headers['X-Interlock'],'1'); return {ok:!reject,json:async()=>({saved:true}),text:async()=> 'Error de validación'};}
+ return {ok:true,json:async()=>structuredClone(data)};
+}});
+const inputs = node => [...(node.name ? [node] : []), ...node.children.flatMap(inputs)];
+(async()=>{
+ vm.runInContext(scripts[1][1],context);
+ await elements['load-config'].handlers.click();
+ assert.equal(elements['config-form'].hidden,false);
+ const fields=inputs(elements['config-fields']);
+ assert.equal(fields.filter(f=>f.name==='enabled').length,16);
+ const password=fields.find(f=>f.name==='password');
+ const clear=fields.find(f=>f.name==='clearPassword');
+ const jsonFlags=fields.filter(f=>f.name==='payloadJson');
+ assert.equal(jsonFlags.length,16);
+ jsonFlags[0].checked=true;
+ const submit=()=>elements['config-form'].handlers.submit({preventDefault(){}});
+ await submit();
+ assert.equal('password' in submitted.mqtt,false);
+ assert.equal(submitted.inputs[0].payloadJson,true);
+ assert.equal(submitted.outputs[0].stateJson,false);
+ assert.equal(submitted.outputs[0].jsonPath,'');
+ password.value='replacement'; await submit();
+ assert.equal(submitted.mqtt.password,'replacement');
+ assert.equal(password.value,'');
+ clear.checked=true; await submit();
+ assert.equal(submitted.mqtt.password,'');
+ reject=true; password.value='retry'; await submit();
+ assert.equal(password.value,'retry');
+ assert.match(elements['config-message'].textContent,/No se pudo confirmar/);
+ assert.equal(elements['save-config'].disabled,false);
+ reject=false;
+ data.signals=[{enabled:true,name:'S1',topic:'s1',jsonPath:'Aspecto',blinkMs:500,lights:[1,2,3,4].map(relay=>({name:'Foco '+relay,relay})),aspects:[{value:'VíaLibre',on:[3],blink:[4]}]}];
+ data.outputs[0].enabled=true;
+ await elements['load-config'].handlers.click();
+ await submit();
+ assert.equal(submitted.signals[0].lights.length,4);
+ assert.deepEqual(submitted.signals[0].aspects[0],{value:'VíaLibre',on:[3],blink:[4]});
+ assert.equal(submitted.outputs[0].enabled,false);
+ assert.equal(submitted.signals[0].blinkMs,500);
+ console.log('OK: 16 channel editor, save, password keep/replace/delete, error recovery');
+})().catch(error=>{console.error(error);process.exitCode=1;});

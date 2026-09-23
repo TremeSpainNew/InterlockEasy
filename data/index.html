@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Interlock Easy</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f3f4f6;color:#111827;margin:0}
+header{background:#111827;color:white;padding:18px 24px}
+main{max-width:1100px;margin:auto;padding:24px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}
+.card{background:white;border:1px solid #ddd;border-radius:12px;padding:18px}
+.badge{float:right;background:#e5e7eb;padding:4px 8px;border-radius:999px;font-size:12px}
+h2{margin:28px 0 16px}.state{font-size:22px;font-weight:600}
+.active{color:#166534}.muted{color:#4b5563;font-size:14px}
+.note{background:#fff7d6;border:1px solid #ecd26c;padding:14px;border-radius:10px;margin-bottom:20px}
+.summary{display:flex;gap:12px 28px;flex-wrap:wrap;margin:20px 0}
+.summary p{margin:0}footer{margin-top:24px;font-size:14px;color:#4b5563}
+button{padding:10px 16px;border:0;border-radius:8px;background:#1d4ed8;color:white;cursor:pointer}button:disabled{opacity:.5;cursor:wait}
+fieldset{border:1px solid #ddd;border-radius:10px;margin:16px 0;padding:16px}legend{font-weight:600}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+label{display:flex;flex-direction:column;gap:6px;font-size:14px}textarea{font:inherit;padding:8px;resize:vertical;min-width:0}input{font:inherit;padding:8px;border:1px solid #9ca3af;border-radius:6px;min-width:0}input[type=checkbox]{align-self:flex-start}
+details{margin:12px 0}summary{cursor:pointer;padding:12px;background:#e5e7eb;border-radius:8px}.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<header><strong>Interlock Easy</strong> · ESP32-S3 ETH 8DI/8RO</header>
+<main>
+<div class="note" id="connection" role="status">Conectando con el módulo…</div>
+<div class="summary">
+<p>IP: <strong id="ip">—</strong></p>
+<p>Ethernet: <strong id="ethernet">—</strong></p>
+<p>MQTT: <strong id="mqtt">—</strong></p>
+<p>Relés: <strong id="relays">—</strong></p>
+</div>
+<h2>Entradas</h2>
+<div class="grid" id="inputs"></div>
+<h2>Señales</h2>
+<div class="grid" id="signals"><p>Sin señales configuradas.</p></div>
+<h2>Salidas</h2>
+<p class="muted">Las salidas muestran el último mando aceptado por el controlador, sin confirmación de los contactos físicos.</p>
+<div class="grid" id="outputs"></div>
+<h2>Configuración</h2>
+<button type="button" id="load-config">Cargar configuración</button>
+<p id="config-message" role="status"></p>
+<form id="config-form" hidden>
+<div id="config-fields"></div>
+<div class="actions"><button type="submit" id="save-config">Guardar y aplicar</button><span>Los relés conservan su estado al guardar.</span></div>
+</form>
+<footer id="updated">Esperando la primera lectura.</footer>
+</main>
+<script>
+const byId = id => document.getElementById(id);
+function createCards(id, prefix, label) {
+  return Array.from({length: 8}, (_, index) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = prefix + (index + 1);
+    const name = document.createElement('b');
+    name.textContent = label + ' ' + (index + 1);
+    const state = document.createElement('p');
+    state.className = 'state';
+    state.textContent = 'Sin datos';
+    const enabled = document.createElement('p');
+    enabled.className = 'muted';
+    enabled.textContent = 'MQTT: —';
+    card.append(badge, name, state, enabled);
+    byId(id).append(card);
+    return {name, state, enabled};
+  });
+}
+const inputs = createCards('inputs', 'DI', 'Entrada');
+const outputs = createCards('outputs', 'RO', 'Relé');
+function render(cards, values, label, on, off) {
+  values.forEach((item, i) => {
+    cards[i].name.textContent = item.name || label + ' ' + item.channel;
+    cards[i].state.textContent = item.state === null ? 'No disponible' : item.state ? on : off;
+    cards[i].state.className = 'state' + (item.state === true ? ' active' : '');
+    cards[i].enabled.textContent = item.signal ? 'Asignado a señal: ' + item.signal : item.enabled ? 'MQTT habilitado' : 'MQTT deshabilitado';
+  });
+}
+function validChannels(items) {
+  return Array.isArray(items) && items.length === 8 && items.every((item, i) =>
+    item && item.channel === i + 1 && typeof item.name === 'string' &&
+    typeof item.enabled === 'boolean' && (typeof item.state === 'boolean' || item.state === null));
+}
+async function refresh() {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4000);
+  try {
+    const response = await fetch('/api/status', {cache: 'no-store', signal: controller.signal});
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    if (!validChannels(data.inputs) || !validChannels(data.outputs) || !data.ethernet || !data.mqtt)
+      throw new Error('Respuesta no válida');
+    render(inputs, data.inputs, 'Entrada', 'Activa', 'Inactiva');
+    render(outputs, data.outputs, 'Relé', 'ON', 'OFF');
+    const signalArea = byId('signals');
+    if (signalArea) {
+      signalArea.replaceChildren();
+      for (const signal of data.signals || []) {
+        const card = document.createElement('div'); card.className = 'card';
+        const title = document.createElement('b'); title.textContent = signal.name;
+        const aspect = document.createElement('p'); aspect.textContent = !signal.enabled ? 'Deshabilitada' : signal.aspect || 'Sin aspecto recibido';
+        card.append(title, aspect);
+        for (const light of signal.lights) {
+          const row = document.createElement('p');
+          row.textContent = light.name + ' · RO' + light.relay + ': ' + (light.state === null ? 'No disponible' : light.state ? 'ON' : 'OFF');
+          row.className = light.state ? 'active' : 'muted'; card.append(row);
+        }
+        signalArea.append(card);
+      }
+      if (!(data.signals || []).length) signalArea.textContent = 'Sin señales configuradas.';
+    }
+    byId('ip').textContent = data.ethernet.ip;
+    byId('ethernet').textContent = data.ethernet.connected ? 'Conectado' : 'Desconectado';
+    byId('mqtt').textContent = data.mqtt.connected ? 'Conectado' : data.mqtt.configured ? 'Desconectado' : 'Sin configurar';
+    byId('relays').textContent = data.outputsReady ? 'Controlador inicializado' : 'No disponible';
+    byId('connection').textContent = 'Conectado al módulo · actualización cada segundo';
+    byId('updated').textContent = 'Última lectura: ' + new Date().toLocaleTimeString('es-ES');
+  } catch (error) {
+    byId('connection').textContent = 'Sin comunicación con el módulo. Reintentando…';
+    for (const card of [...inputs, ...outputs]) {
+      card.state.textContent = 'Sin datos';
+      card.state.className = 'state';
+      card.enabled.textContent = 'MQTT: —';
+    }
+    if (byId('signals')) byId('signals').textContent = 'Sin datos de señales';
+    for (const id of ['ip', 'ethernet', 'mqtt', 'relays']) byId(id).textContent = '—';
+  } finally {
+    clearTimeout(timeout);
+    setTimeout(refresh, 1000);
+  }
+}
+refresh();
+</script>
+<script>
+(() => {
+  const form = document.getElementById('config-form');
+  const container = document.getElementById('config-fields');
+  const message = document.getElementById('config-message');
+  const load = document.getElementById('load-config');
+  const save = document.getElementById('save-config');
+  let controls = null;
+  let busy = false;
+  let signalEditors = [];
+  const common = [['enabled','MQTT habilitado','checkbox'],['name','Nombre','text',64],['payloadJson','Payloads en formato JSON','checkbox'],['payloadOn','Payload ON / activo','textarea',256],['payloadOff','Payload OFF / inactivo','textarea',256],['retain','Retener estado en el broker','checkbox']];
+  function fields(parent, definitions, values) {
+    const grid = document.createElement('div'); grid.className = 'fields'; parent.append(grid);
+    const result = {};
+    definitions.forEach(([key, title, type, limit]) => {
+      const label = document.createElement('label'); label.textContent = title;
+      const input = document.createElement(type === 'textarea' ? 'textarea' : 'input'); if (type !== 'textarea') input.type = type; else input.rows = 3; input.name = key;
+      if (type === 'checkbox') input.checked = !!values[key];
+      else input.value = values[key] ?? '';
+      if (limit) input.maxLength = limit;
+      if (type === 'number') {input.min = key === 'port' ? 1 : 5; input.max = key === 'port' ? 65535 : 3600; input.required = true;}
+      if (key === 'clientId') input.required = true;
+      if (type === 'password') input.autocomplete = 'new-password';
+      label.append(input); grid.append(label); result[key] = input;
+    });
+    return result;
+  }
+  function values(group) {
+    return Object.fromEntries(Object.entries(group).map(([key, input]) => [key, input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value]));
+  }
+  function signalEditor(parent, initial) {
+    const box = document.createElement('fieldset'); parent.append(box);
+    const legend = document.createElement('legend'); legend.textContent = 'Señal'; box.append(legend);
+    const base = fields(box, [['enabled','Señal habilitada','checkbox'],['name','Nombre','text',64],['topic','Topic MQTT de aspectos','text',128],['jsonPath','Campo JSON del aspecto','text',64],['blinkMs','Duración de cada fase de parpadeo (ms)','number']], initial);
+    base.blinkMs.min = 250; base.blinkMs.max = 10000;
+    const lightsArea = document.createElement('div'); box.append(lightsArea);
+    const lights = [];
+    const aspects = [];
+    const aspectsArea = document.createElement('div');
+    function button(label, action) {
+      const node = document.createElement('button'); node.type = 'button'; node.textContent = label;
+      node.addEventListener('click', action); return node;
+    }
+    function addLight(item = {name:'Foco ' + (lights.length + 1), relay:lights.length + 1}) {
+      if (lights.length >= 8) return;
+      const row = document.createElement('fieldset'); lightsArea.append(row);
+      const c = fields(row, [['name','Foco ' + (lights.length + 1),'text',32],['relay','Relé RO (1–8)','number']], item);
+      c.relay.min = 1; c.relay.max = 8;
+      lights.push({row,c});
+      aspects.forEach(a => addCell(a, lights.length - 1, 'off'));
+    }
+    function addCell(aspect, index, state) {
+      const label = document.createElement('label'); label.textContent = 'Foco ' + (index + 1);
+      const select = document.createElement('select');
+      for (const [value,text] of [['off','Apagado'],['on','Fijo'],['blink','Parpadeo']]) {
+        const option = document.createElement('option'); option.value = value; option.textContent = text; select.append(option);
+      }
+      select.value = state; label.append(select); aspect.grid.append(label); aspect.cells.push({label,select});
+    }
+    (initial.lights || []).forEach(addLight);
+    box.append(button('Añadir foco', () => addLight()), button('Quitar último foco', () => {
+      if (lights.length <= 1) return;
+      lights.pop().row.remove(); aspects.forEach(a => a.cells.pop().label.remove());
+    }));
+    box.append(aspectsArea);
+    function addAspect(item = {value:'',on:[],blink:[]}) {
+      if (aspects.length >= 12) return;
+      const row = document.createElement('fieldset'); aspectsArea.append(row);
+      const c = fields(row, [['value','Valor de Aspecto (ej. VíaLibre)','text',64]], item);
+      const grid = document.createElement('div'); grid.className = 'fields'; row.append(grid);
+      const aspect = {row,c,grid,cells:[]}; aspects.push(aspect);
+      lights.forEach((_,i) => addCell(aspect,i,(item.blink || []).includes(i+1) ? 'blink' : (item.on || []).includes(i+1) ? 'on' : 'off'));
+      row.append(button('Eliminar aspecto', () => {aspects.splice(aspects.indexOf(aspect),1); row.remove();}));
+    }
+    (initial.aspects || []).forEach(addAspect);
+    box.append(button('Añadir aspecto', () => addAspect()));
+    const editor = {read:() => ({...values(base), lights:lights.map(l=>values(l.c)), aspects:aspects.map(a=>({value:a.c.value.value,on:a.cells.flatMap((c,i)=>c.select.value==='on'?[i+1]:[]),blink:a.cells.flatMap((c,i)=>c.select.value==='blink'?[i+1]:[])}))})};
+    box.append(button('Eliminar señal', () => {signalEditors.splice(signalEditors.indexOf(editor),1); box.remove();}));
+    signalEditors.push(editor);
+  }
+  async function request(options) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch('/api/config', {...options, cache:'no-store', signal:controller.signal});
+      if (!response.ok) throw new Error(await response.text());
+      return await response.json();
+    } finally {clearTimeout(timer);}
+  }
+  function lock(value) {busy = value; load.disabled = value; save.disabled = value;}
+  load.addEventListener('click', async () => {
+    if (busy) return;
+    lock(true); message.textContent = 'Cargando…';
+    try {
+      const data = await request();
+      if (!data.mqtt || !Array.isArray(data.inputs) || data.inputs.length !== 8 || !Array.isArray(data.outputs) || data.outputs.length !== 8) throw new Error('Configuración no válida.');
+      container.replaceChildren();
+      const broker = document.createElement('fieldset');
+      const legend = document.createElement('legend'); legend.textContent = 'Broker MQTT'; broker.append(legend); container.append(broker);
+      controls = {mqtt:fields(broker, [['host','Servidor (vacío desactiva MQTT)','text',128],['port','Puerto','number'],['clientId','Client ID','text',64],['username','Usuario','text',128],['password','Nueva contraseña (vacío conserva la actual)','password',128],['keepAlive','Keep alive (segundos)','number'],['clearPassword','Borrar contraseña guardada','checkbox']], data.mqtt), inputs:[], outputs:[]};
+      const passwordNote = document.createElement('p'); passwordNote.textContent = data.mqtt.passwordSet ? 'Hay una contraseña guardada.' : 'No hay contraseña guardada.'; broker.append(passwordNote);
+      for (const kind of ['inputs','outputs']) data[kind].forEach((item, i) => {
+        const section = document.createElement('details');
+        const summary = document.createElement('summary'); summary.textContent = (kind === 'inputs' ? 'Entrada DI' : 'Relé RO') + (i + 1); section.append(summary); container.append(section);
+        const extra = kind === 'inputs' ? [['topic','Topic de publicación','text',128],['inverted','Invertir entrada','checkbox']] : [['commandTopic','Topic de mando','text',128],['jsonPath','Campo JSON recibido (vacío: mensaje completo)','text',64],['publishState','Publicar estado','checkbox'],['stateTopic','Topic de estado','text',128],['stateJson','Publicar estado en JSON','checkbox'],['stateOn','Payload de estado ON','textarea',256],['stateOff','Payload de estado OFF','textarea',256]];
+        controls[kind].push(fields(section, [...common, ...extra], item));
+      });
+      signalEditors = [];
+      const signalsArea = document.createElement('section'); container.append(signalsArea);
+      const signalsTitle = document.createElement('h3'); signalsTitle.textContent = 'Señales de varios focos'; signalsArea.append(signalsTitle);
+      const note = document.createElement('p'); note.textContent = 'Cada foco usa un relé exclusivo. Al guardar, los mandos individuales de los relés de señales habilitadas se desactivan. Los valores de aspecto se escriben sin comillas. El guardado detiene el parpadeo hasta recibir otro aspecto. RO asignados deben cablearse según esta tabla.'; signalsArea.append(note);
+      (data.signals || []).forEach(signal => signalEditor(signalsArea, signal));
+      const addSignal = document.createElement('button'); addSignal.type = 'button'; addSignal.textContent = 'Añadir señal';
+      addSignal.addEventListener('click', () => {
+        if (signalEditors.length >= 8) {message.textContent = 'Máximo 8 señales.'; return;}
+        signalEditor(signalsArea, {enabled:false,name:'Nueva señal',topic:'',jsonPath:'Aspecto',blinkMs:500,lights:[{name:'Foco 1',relay:1}],aspects:[{value:'Apagada',on:[],blink:[]}]});
+      });
+      signalsArea.append(addSignal);
+      const help = document.createElement('p');
+      help.textContent = 'JSON: escribe el documento completo para publicar, por ejemplo {"estado":true}. Para recibir un campo, indica su ruta (estado o datos.estado) y valores JSON como true / false o "ON" / "OFF". Con ruta vacía se compara el documento completo, sin importar espacios ni orden de claves. Máximo 256 bytes por payload.';
+      container.append(help);
+      form.hidden = false; message.textContent = 'Configuración cargada. Edita y guarda para aplicar.';
+    } catch(error) {message.textContent = 'No se pudo cargar: ' + error.message;}
+    finally {lock(false);}
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); if (busy || !controls) return;
+    const data = {mqtt:values(controls.mqtt), inputs:controls.inputs.map(values), outputs:controls.outputs.map(values),signals:signalEditors.map(editor=>editor.read())};
+    const reserved = new Set();
+    for (const signal of data.signals) {
+      const local = new Set();
+      for (const light of signal.lights) {
+        if (!Number.isInteger(light.relay) || light.relay < 1 || light.relay > 8 || local.has(light.relay) || (signal.enabled && reserved.has(light.relay))) {message.textContent = "Revisa los relés de las señales: deben ser válidos y exclusivos."; return;}
+        local.add(light.relay);
+        if (signal.enabled) {reserved.add(light.relay); data.outputs[light.relay-1].enabled = false;}
+      }
+    }
+    if (data.mqtt.clearPassword && data.mqtt.password) {message.textContent = 'Elige entre borrar o sustituir la contraseña.'; return;}
+    if (!data.mqtt.clearPassword && !data.mqtt.password) delete data.mqtt.password;
+    delete data.mqtt.clearPassword;
+    lock(true); message.textContent = 'Guardando…';
+    try {
+      await request({method:'POST', headers:{'Content-Type':'application/json','X-Interlock':'1'}, body:JSON.stringify(data)});
+      reserved.forEach(relay => {controls.outputs[relay-1].enabled.checked = false;});
+      controls.mqtt.password.value = ''; controls.mqtt.clearPassword.checked = false;
+      message.textContent = 'Configuración guardada. MQTT aplicará los cambios y volverá a publicar los estados al conectar.';
+    } catch(error) {message.textContent = 'No se pudo confirmar el guardado: ' + error.message + '. Puedes cargar la configuración para comprobarla.';}
+    finally {lock(false);}
+  });
+})();
+</script>
+</body>
+</html>
