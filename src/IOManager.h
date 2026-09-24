@@ -7,12 +7,19 @@ public:
     void loop();
     void refreshInputs();
     bool getInput(uint8_t channel);
+    bool simulateInput(uint8_t channel, int8_t state);
+    bool inputSimulated(uint8_t channel) const;
+    bool getRawInput(uint8_t channel) const;
+    bool inputFiltering(uint8_t channel) const;
     bool getOutput(uint8_t channel);
     bool outputsReady() const { return relayReady; }
     bool setOutputs(uint8_t mask, uint8_t states);
     void setOutput(uint8_t channel, bool state);
 
 private:
+    bool simulated[8] = {};
+    bool simulatedState[8] = {};
+    uint32_t simulationSince[8] = {};
     bool inputState[8] = {}; // Debounced physical levels; inversion is applied on access.
     bool candidateState[8] = {};
     uint32_t candidateSince[8] = {};

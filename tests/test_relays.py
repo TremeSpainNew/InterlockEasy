@@ -11,6 +11,7 @@ STUBS = {
 using String = std::string;
 using byte = uint8_t;
 constexpr int INPUT = 0;
+constexpr int INPUT_PULLUP = 2;
 inline void pinMode(int, int) {}
 inline int digitalRead(int) { return 0; }
 inline unsigned long millis() { return 0; }

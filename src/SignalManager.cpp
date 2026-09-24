@@ -49,3 +49,14 @@ void SignalManager::loop() {
         apply(i, active[i], ((now - started[i]) / signal.blinkMs) % 2 == 0);
     }
 }
+
+bool SignalManager::testAspect(uint8_t index, const String& value) {
+    if (index >= Config.signals.size() || !Config.signals[index].enabled) return false;
+    const auto& signal = Config.signals[index];
+    for (size_t j = 0; j < signal.aspects.size(); ++j) {
+        if (signal.aspects[j].value != value) continue;
+        if (!apply(index, j, true)) return false;
+        active[index] = j; started[index] = millis(); return true;
+    }
+    return false;
+}

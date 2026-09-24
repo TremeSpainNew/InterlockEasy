@@ -1,5 +1,25 @@
 
 const byId = id => document.getElementById(id);
+let testBusy = false;
+async function sendTest(command) {
+  if (testBusy) return;
+  testBusy = true;
+  const feedback = byId('test-feedback');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  if (feedback) feedback.textContent = 'Aplicando prueba…';
+  try {
+    const response = await fetch('/api/test', {method:'POST', headers:{'Content-Type':'application/json','X-Interlock':'1'}, body:JSON.stringify(command), signal:controller.signal});
+    if (!response.ok) throw new Error(await response.text());
+    if (feedback) feedback.textContent = 'Prueba aplicada. El estado se actualizará en la siguiente lectura.';
+  } catch(error) {
+    if (feedback) feedback.textContent = 'No se pudo confirmar la prueba: ' + error.message + '. Comprueba el estado antes de repetir.';
+  } finally {clearTimeout(timer); testBusy = false;}
+}
+function testButton(label, command) {
+  const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+  button.disabled = true; button.onclick = () => sendTest(command); return button;
+}
 function createCards(id, prefix, label) {
   return Array.from({length: 8}, (_, index) => {
     const card = document.createElement('div');
@@ -15,18 +35,29 @@ function createCards(id, prefix, label) {
     const enabled = document.createElement('p');
     enabled.className = 'muted';
     enabled.textContent = 'MQTT: —';
-    card.append(badge, name, state, enabled);
+    const diagnostic = document.createElement('p'); diagnostic.className = 'muted';
+    card.append(badge, name, state, enabled, diagnostic);
+    const actions = document.createElement('div'); actions.className = 'test-controls';
+    const buttons = id === 'inputs' ? [
+      testButton('Simular activa', {type:'input',channel:index+1,state:true}),
+      testButton('Simular inactiva', {type:'input',channel:index+1,state:false}),
+      testButton('Lectura física', {type:'input',channel:index+1,state:null})
+    ] : [testButton('ON', {type:'relay',channel:index+1,state:true}), testButton('OFF', {type:'relay',channel:index+1,state:false})];
+    actions.append(...buttons); card.append(actions);
     byId(id).append(card);
-    return {name, state, enabled};
+    return {name, state, enabled, diagnostic, buttons};
   });
 }
 const inputs = createCards('inputs', 'DI', 'Entrada');
 const outputs = createCards('outputs', 'RO', 'Relé');
-function render(cards, values, label, on, off) {
+function render(cards, values, label, on, off, ready = true) {
   values.forEach((item, i) => {
     cards[i].name.textContent = item.name || label + ' ' + item.channel;
     cards[i].state.textContent = item.state === null ? 'No disponible' : item.state ? on : off;
+    if (item.simulated) cards[i].state.textContent += ' · SIMULADA';
+    cards[i].buttons.forEach(button => {button.disabled = !ready || !!item.signal || testBusy;});
     cards[i].state.className = 'state' + (item.state === true ? ' active' : '');
+    cards[i].diagnostic.textContent = typeof item.raw === 'boolean' ? 'GPIO ' + (item.raw ? 'alto' : 'bajo') + ' · ' + item.debounceMs + ' ms' + (item.filtering ? ' · filtrando' : '') + (item.publishPending ? ' · envío pendiente' : '') : '';
     cards[i].enabled.textContent = item.signal ? 'Asignado a señal: ' + item.signal : item.enabled ? 'MQTT habilitado' : 'MQTT deshabilitado';
   });
 }
@@ -45,7 +76,7 @@ async function refresh() {
     if (!validChannels(data.inputs) || !validChannels(data.outputs) || !data.ethernet || !data.mqtt)
       throw new Error('Respuesta no válida');
     render(inputs, data.inputs, 'Entrada', 'Activa', 'Inactiva');
-    render(outputs, data.outputs, 'Relé', 'ON', 'OFF');
+    render(outputs, data.outputs, 'Relé', 'ON', 'OFF', data.outputsReady);
     const signalArea = byId('signals');
     if (signalArea) {
       signalArea.replaceChildren();
@@ -59,7 +90,12 @@ async function refresh() {
           row.textContent = light.name + ' · RO' + light.relay + ': ' + (light.state === null ? 'No disponible' : light.state ? 'ON' : 'OFF');
           row.className = light.state ? 'active' : 'muted'; card.append(row);
         }
-        signalArea.append(card);
+        const actions = document.createElement('div'); actions.className = 'test-controls';
+        for (const value of signal.aspects || []) {
+          const button = testButton(value, {type:'signal',channel:signal.channel,aspect:value});
+          button.disabled = !signal.enabled || !data.outputsReady || testBusy; actions.append(button);
+        }
+        card.append(actions); signalArea.append(card);
       }
       if (!(data.signals || []).length) signalArea.textContent = 'Sin señales configuradas.';
     }
@@ -74,9 +110,11 @@ async function refresh() {
     byId('connection').className = 'note offline';
     byId('connection').textContent = 'Sin comunicación con el módulo. Reintentando…';
     for (const card of [...inputs, ...outputs]) {
+      card.buttons.forEach(button => {button.disabled = true;});
       card.state.textContent = 'Sin datos';
       card.state.className = 'state';
       card.enabled.textContent = 'MQTT: —';
+      card.diagnostic.textContent = '';
     }
     if (byId('signals')) byId('signals').textContent = 'Sin datos de señales';
     for (const id of ['ip', 'ethernet', 'mqtt', 'relays']) byId(id).textContent = '—';

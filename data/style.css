@@ -18,3 +18,5 @@ details{margin:10px 0;border:1px solid var(--line);border-radius:9px;background:
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 
 nav a[aria-current="page"]{background:#294450;color:white}
+
+.test-controls{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}.test-controls button{font-size:11px;padding:7px 9px;min-height:36px}.test-controls button+button{margin-left:0}#test-feedback{font-size:13px;color:var(--muted)}

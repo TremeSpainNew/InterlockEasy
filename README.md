@@ -236,9 +236,38 @@ salidas. Los payloads siguen siendo cadenas dentro del JSON de configuración.
 
 Prueba local: `python3 tests/test_json_payload.py`.
 
+Los GPIO de DI1–DI8 se inicializan con `INPUT_PULLUP` para mantener un nivel
+alto de reposo. Referencia: [configuración ESPHome de esta placa](https://devices.esphome.io/devices/waveshare-esp32-s3-eth-8di-8ro/).
+
 Las entradas están invertidas por defecto: nivel GPIO bajo = activa y alto =
 inactiva. Se puede cambiar **Invertir entrada** por canal. Los valores de inversión
 ya guardados en NVS se conservan al actualizar el firmware.
+
+## Pruebas desde el resumen
+
+En `/index.html`, cada relé independiente tiene botones ON/OFF que actúan sobre
+el hardware, incluso si MQTT está deshabilitado. Los relés reservados por una
+señal no admiten mandos individuales; la tarjeta de señal ofrece sus aspectos.
+Las escrituras I²C fallidas se muestran como error y no confirman un estado nuevo.
+Los mandos MQTT siguen activos y pueden sustituir una prueba de relé o señal.
+
+Cada entrada tiene **Simular activa**, **Simular inactiva** y **Lectura física**.
+La simulación sustituye el estado lógico durante 60 segundos, sin modificar GPIO,
+inversión ni NVS. Se identifica como **SIMULADA** y publica por MQTT si el canal
+está habilitado. La lectura física y el antirrebote continúan en segundo plano.
+Al cancelar o expirar se publica el estado físico filtrado. Reiniciar cancela las
+simulaciones; cerrar el navegador no las cancela inmediatamente (expiran en 60 s).
+
+API `POST /api/test`, con JSON y `X-Interlock: 1`:
+
+- `{"type":"relay","channel":1,"state":true}`: activar RO1.
+- `{"type":"input","channel":1,"state":false}`: simular DI1 inactiva.
+- `{"type":"input","channel":1,"state":null}`: restaurar DI1 física.
+- `{"type":"signal","channel":1,"aspect":"VíaLibre"}`: probar el aspecto de la primera señal.
+
+Los canales son 1..8. Una señal conserva el aspecto de prueba hasta otro mando,
+reinicio o cambio de configuración; los relés no tienen apagado temporizado.
+La respuesta `{"applied":true}` confirma aplicación, no realimentación física.
 
 ## Antirrebote de entradas
 
@@ -255,7 +284,23 @@ filtrado, también al reconectar. La inversión lógica se aplica después del f
 La primera lectura al arrancar establece el estado inicial sin espera; los
 cambios posteriores se filtran. Pulsos inferiores al intervalo pueden descartarse.
 Los tiempos dependen del muestreo y pueden aumentar si una operación de red
-bloquea el bucle; no se detectan transiciones entre muestras.
+bloquea el bucle; no se detectan transiciones entre muestras. Si pasan más de
+20 ms entre lecturas, se reinicia el tiempo de estabilidad del candidato: ese
+periodo sin muestras no cuenta como antirrebote confirmado.
+
+El escaneo registra cambios sin escribir en sockets. MQTT atiende una cola de
+último estado por entrada, un canal por iteración, con reintento de los envíos
+fallidos una vez por segundo y sin impedir que se prueben otros canales. Al
+reconectar se programan los estados actuales de todas las entradas habilitadas.
+La cola no es un historial de pulsos: varios cambios durante una desconexión se
+consolidan en el estado más reciente. QoS 0 confirma aceptación por el cliente
+MQTT, no recepción por el broker.
+
+El resumen muestra el último nivel físico muestreado (`raw`), el estado de
+filtrado (`filtering`), la inversión, el intervalo y si hay publicación pendiente
+(`publishPending`). Las operaciones de red siguen siendo cooperativas y pueden
+bloquear; esta mejora no convierte el muestreo en captura por interrupciones.
+Prueba de publicaciones pendientes: `python3 tests/test_input_queue.py`.
 
 Prueba: `python3 tests/test_debounce.py` (rebotes en ambos sentidos, intervalos
 independientes, inversión, reconexión, filtro desactivado y desbordamiento del reloj).

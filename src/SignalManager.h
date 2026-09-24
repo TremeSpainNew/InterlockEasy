@@ -6,6 +6,7 @@ public:
     SignalManager();
     void reload();
     void loop();
+    bool testAspect(uint8_t signal, const String& value);
     void command(const String& topic, const String& payload);
     String aspect(uint8_t signal) const;
 private:

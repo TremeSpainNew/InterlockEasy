@@ -24,6 +24,7 @@ void WebManager::close() {
     offset = 0;
     responding = false;
     readingBody = false;
+    testRequest = false;
     contentLength = 0;
     body = "";
 
@@ -61,6 +62,12 @@ void WebManager::status() {
         item["name"] = Config.inputs[i].name;
         item["enabled"] = Config.inputs[i].enabled;
         item["state"] = IO.getInput(i);
+        item["simulated"] = IO.inputSimulated(i);
+        item["raw"] = IO.getRawInput(i);
+        item["filtering"] = IO.inputFiltering(i);
+        item["publishPending"] = MQTT.inputPending(i);
+        item["inverted"] = Config.inputs[i].inverted;
+        item["debounceMs"] = Config.inputs[i].debounceMs;
     }
     for (uint8_t i = 0; i < NUM_OUTPUTS; ++i) {
         JsonObject item = outputs.createNestedObject();
@@ -78,6 +85,9 @@ void WebManager::status() {
         JsonObject item = signals.createNestedObject();
         item["name"] = signal.name; item["enabled"] = signal.enabled;
         item["aspect"] = Signals.aspect(i);
+        item["channel"] = i + 1;
+        JsonArray aspects = item.createNestedArray("aspects");
+        for (const auto& aspect : signal.aspects) aspects.add(aspect.value);
         JsonArray lights = item.createNestedArray("lights");
         for (const auto& light : signal.lights) {
             JsonObject entry = lights.createNestedObject();
@@ -109,7 +119,8 @@ void WebManager::dispatch() {
     String path = line.substring(first + 1, second);
     const int query = path.indexOf('?');
     if (query >= 0) path.remove(query);
-    if (method == "POST" && path == "/api/config") {
+    if (method == "POST" && (path == "/api/config" || path == "/api/test")) {
+        testRequest = path == "/api/test";
         bool hasLength = false, json = false, token = false;
         for (int pos = end + 2; pos < int(request.length()) - 2;) {
             const int next = request.indexOf("\r\n", pos);
@@ -142,7 +153,7 @@ void WebManager::dispatch() {
             pos = next + 2;
         }
         if (!hasLength || !contentLength) { respond(411, "Length Required", "text/plain", "Falta Content-Length."); return; }
-        if (contentLength > 24576) { respond(413, "Content Too Large", "text/plain", "Configuracion demasiado grande."); return; }
+        if (contentLength > (testRequest ? 512U : 24576U)) { respond(413, "Content Too Large", "text/plain", "Configuracion demasiado grande."); return; }
         if (!json) { respond(415, "Unsupported Media Type", "text/plain", "Se requiere application/json."); return; }
         // A custom header prevents cross-origin HTML forms from changing settings.
         if (!token) { respond(403, "Forbidden", "text/plain", "Falta X-Interlock: 1."); return; }
@@ -199,6 +210,35 @@ void WebManager::saveConfig() {
     respond(200, "OK", "application/json", "{\"saved\":true}");
 }
 
+void WebManager::testControl() {
+    DynamicJsonDocument doc(1024);
+    if (deserializeJson(doc, body) || !doc["type"].is<const char*>() ||
+        !doc["channel"].is<unsigned int>() || doc["channel"].as<unsigned int>() < 1 ||
+        doc["channel"].as<unsigned int>() > 8) {
+        respond(400, "Bad Request", "text/plain", "Mando de prueba no valido."); return;
+    }
+    const uint8_t channel = doc["channel"].as<unsigned int>() - 1;
+    const String type = doc["type"].as<String>();
+    bool ok = false;
+    if (type == "input" && doc.containsKey("state") && (doc["state"].isNull() || doc["state"].is<bool>())) {
+        ok = IO.simulateInput(channel, doc["state"].isNull() ? -1 : doc["state"].as<bool>() ? 1 : 0);
+    } else if (type == "relay" && doc["state"].is<bool>()) {
+        if (Config.relayAssigned(channel)) {
+            respond(409, "Conflict", "text/plain; charset=utf-8", "Relé reservado: prueba un aspecto de su señal."); return;
+        }
+        if (IO.outputsReady()) {
+            IO.setOutput(channel, doc["state"].as<bool>());
+            ok = IO.getOutput(channel) == doc["state"].as<bool>();
+        }
+    } else if (type == "signal" && doc["aspect"].is<const char*>()) {
+        ok = Signals.testAspect(channel, doc["aspect"].as<String>());
+    } else {
+        respond(400, "Bad Request", "text/plain", "Tipo o valor no valido."); return;
+    }
+    if (!ok) { respond(409, "Conflict", "text/plain", "No se pudo aplicar la prueba. Comprueba canal, aspecto y controlador."); return; }
+    respond(200, "OK", "application/json", "{\"applied\":true}");
+}
+
 void WebManager::loop() {
     if (!client) {
         client = server.accept();
@@ -215,7 +255,10 @@ void WebManager::loop() {
         for (int budget = 0; budget < 256 && client.available(); ++budget) {
             if (readingBody) {
                 body += char(client.read());
-                if (body.length() == contentLength) { saveConfig(); body = ""; break; }
+                if (body.length() == contentLength) {
+                    if (testRequest) testControl(); else saveConfig();
+                    body = ""; break;
+                }
                 continue;
             }
             request += char(client.read());

@@ -16,6 +16,7 @@ void MqttManager::begin() {
 void MqttManager::reload() {
     if (!mqtt) return;
     mqtt->disconnect();
+    inputQueue = InputStateQueue{};
     mqtt->setBufferSize(2048);
     mqtt->setSocketTimeout(1);
     lastReconnect = millis();
@@ -71,15 +72,31 @@ void MqttManager::loop() {
         return;
     }
     mqtt->loop();
+    if (mqtt->connected()) flushInput();
 }
 
 void MqttManager::publishInput(uint8_t channel, bool state) {
-    if (!mqtt || !mqtt->connected() || channel >= NUM_INPUTS) return;
-    auto &cfg = Config.inputs[channel];
-    if (!cfg.enabled || cfg.topic.isEmpty()) return;
+    if (channel >= NUM_INPUTS) return;
+    // Called from the scanner: no socket writes here.
+    if (!Config.inputs[channel].enabled || Config.inputs[channel].topic.isEmpty()) {
+        inputQueue.clear(channel);
+        return;
+    }
+    inputQueue.set(channel, state);
+}
 
-    const String &payload = state ? cfg.payloadOn : cfg.payloadOff;
-    mqtt->publish(cfg.topic.c_str(), payload.c_str(), cfg.retain);
+bool MqttManager::inputPending(uint8_t channel) const {
+    return channel < NUM_INPUTS && Config.inputs[channel].enabled && inputQueue.pending(channel);
+}
+
+void MqttManager::flushInput() {
+    const int channel = inputQueue.next(uint32_t(millis()));
+    if (channel < 0) return;
+    const auto& cfg = Config.inputs[channel];
+    if (!cfg.enabled || cfg.topic.isEmpty()) { inputQueue.clear(channel); return; }
+    const String& payload = inputQueue.value(channel) ? cfg.payloadOn : cfg.payloadOff;
+    if (mqtt->publish(cfg.topic.c_str(), payload.c_str(), cfg.retain)) inputQueue.clear(channel);
+    // Failure leaves the latest state pending, with a one-second retry per channel.
 }
 
 void MqttManager::publishOutput(uint8_t channel, bool state) {

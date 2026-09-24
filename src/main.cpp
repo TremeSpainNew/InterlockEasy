@@ -31,6 +31,7 @@ void setup() {
 }
 
 void loop() {
+    IO.loop();
     Network.loop();
     MQTT.loop();
     IO.loop();

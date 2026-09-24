@@ -19,7 +19,10 @@ MqttManager MQTT;
 std::vector<std::pair<int,bool>> events;
 void MqttManager::publishInput(uint8_t c,bool s) {events.emplace_back(c,s);}
 void MqttManager::publishOutput(uint8_t,bool) {}
-void tick(uint32_t time) {clockMs=time; IO.loop();}
+void tick(uint32_t time) {
+ while (uint32_t(time-clockMs)>5) {clockMs+=5; IO.loop();}
+ clockMs=time; IO.loop();
+}
 int main() {
  for (auto& input : Config.inputs) input.inverted = false;
  IO.begin();
@@ -35,8 +38,22 @@ int main() {
  Config.inputs[0].inverted=true;IO.refreshInputs();assert(IO.getInput(0));
  Config.inputs[1].debounceMs=0; pins[5]=1;tick(175);assert(IO.getInput(1));
  Config.inputs[2].debounceMs=100; pins[6]=1;tick(180);tick(275);assert(!IO.getInput(2));tick(280);assert(IO.getInput(2));
- pins[7]=1;tick(0xfffffff0U);tick(0x21U);assert(!IO.getInput(3));tick(0x26U);assert(IO.getInput(3));
+ clockMs=1000;IO=IOManager{};IO.begin();
+ pins[7]=1;tick(1005);clockMs=2000;IO.loop();
+ assert(!IO.getInput(3) && IO.inputFiltering(3));
+ tick(2045);assert(!IO.getInput(3));tick(2050);assert(IO.getInput(3));
+ pins[7]=0;clockMs=0xffffffe0U;IO=IOManager{};IO.begin();
+ tick(0xffffffebU);pins[7]=1;tick(0xfffffff0U);tick(0x21U);assert(!IO.getInput(3));tick(0x26U);assert(IO.getInput(3));
  assert(!IO.getInput(8));
+ assert(IO.simulateInput(0,0));assert(IO.inputSimulated(0) && !IO.getInput(0));
+ assert(events.back()==std::make_pair(0,false));
+ const auto count=events.size();
+ pins[4]=1;tick(clockMs+100);assert(!IO.getInput(0));assert(events.size()==count);
+ assert(IO.simulateInput(0,1));assert(IO.getInput(0));
+ assert(IO.simulateInput(0,-1));assert(!IO.inputSimulated(0) && !IO.getInput(0));
+ assert(IO.simulateInput(0,1));clockMs+=60000;IO.loop();
+ assert(!IO.inputSimulated(0) && !IO.getInput(0));
+ assert(!IO.simulateInput(8,1) && !IO.simulateInput(0,2));
 }
 '''
 with tempfile.TemporaryDirectory(prefix='interlock-debounce-') as directory:

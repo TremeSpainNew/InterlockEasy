@@ -7,10 +7,12 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header><div class="brand"><span class="brand-mark" aria-hidden="true">IE</span><div><strong>Interlock Easy</strong><small>Control de entradas y señales</small></div></div><nav aria-label="Navegación principal"><a href="/index.html" aria-current="page">Resumen</a><a href="/mqtt.html">MQTT</a><a href="/inputs.html">Entradas</a><a href="/outputs.html">Salidas</a><a href="/signals.html">Señales</a></nav></header>
+<header><div class="brand"><span class="brand-mark" aria-hidden="true">IE</span><div><strong>Interlock Easy</strong><small>Control de entradas y salidas</small></div></div><nav aria-label="Navegación principal"><a href="/index.html" aria-current="page">Resumen</a><a href="/mqtt.html">MQTT</a><a href="/inputs.html">Entradas</a><a href="/outputs.html">Salidas</a><a href="/signals.html">Señales</a></nav></header>
 <main id="overview">
-<div class="hero"><div><p class="eyebrow">Panel de control</p><h1>Tu instalación, de un vistazo.</h1><p>Entradas, señales y relés conectados por MQTT.</p></div><span class="device-tag">ESP32-S3 · 8 DI / 8 RO</span></div>
+<div class="hero"><div><p class="eyebrow">Panel de control</p><h1>Tu instalación, de un vistazo.</h1><p>Entradas y relés conectados por MQTT.</p></div><span class="device-tag">ESP32-S3 · 8 DI / 8 RO</span></div>
 <div class="note" id="connection" role="status">Conectando con el módulo…</div>
+<div class="note">Pruebas: ON/OFF acciona los relés físicos. Las entradas se simulan durante 60 segundos o hasta pulsar «Lectura física» y publican por MQTT si están habilitadas. Los mandos MQTT siguen activos. Las señales se prueban mediante sus aspectos.</div>
+<p id="test-feedback" role="status" aria-live="polite"></p>
 <div class="summary">
 <p>IP: <strong id="ip">—</strong></p>
 <p>Ethernet: <strong id="ethernet">—</strong></p>

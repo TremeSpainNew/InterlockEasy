@@ -11,8 +11,11 @@ static constexpr uint8_t RELAY_OUTPUT = 0x01;
 static constexpr uint8_t RELAY_CONFIG = 0x03;
 
 void IOManager::begin() {
+    lastScan = uint32_t(millis());
     for (int i = 0; i < 8; i++) {
-        pinMode(INPUT_PINS[i], INPUT);
+        // Bias the optocoupler input high at rest (active-low board inputs).
+        pinMode(INPUT_PINS[i], INPUT_PULLUP);
+        simulated[i] = false;
         inputState[i] = readInput(i);
         candidateState[i] = inputState[i];
         candidateSince[i] = uint32_t(millis());
@@ -48,10 +51,12 @@ void IOManager::refreshInputs() {
 void IOManager::loop() {
     const uint32_t now = uint32_t(millis());
     if (uint32_t(now - lastScan) < 5) return;
+    const bool samplingGap = uint32_t(now - lastScan) > 20;
     lastScan = now;
     for (uint8_t i = 0; i < 8; ++i) {
+        if (simulated[i] && uint32_t(now - simulationSince[i]) >= 60000) simulateInput(i, -1);
         const bool value = readInput(i);
-        if (value != candidateState[i]) {
+        if (value != candidateState[i] || samplingGap) {
             candidateState[i] = value;
             candidateSince[i] = now;
         }
@@ -60,13 +65,35 @@ void IOManager::loop() {
             inputState[i] = candidateState[i];
             const bool logical = getInput(i);
             Serial.printf("DI%d = %d\n", i + 1, logical);
-            MQTT.publishInput(i, logical);
+            if (!simulated[i]) MQTT.publishInput(i, logical);
         }
     }
 }
 
 bool IOManager::getInput(uint8_t channel) {
-    return channel < 8 ? inputState[channel] != Config.inputs[channel].inverted : false;
+    if (channel >= 8) return false;
+    return simulated[channel] ? simulatedState[channel] : inputState[channel] != Config.inputs[channel].inverted;
+}
+
+bool IOManager::inputSimulated(uint8_t channel) const {
+    return channel < 8 && simulated[channel];
+}
+
+bool IOManager::simulateInput(uint8_t channel, int8_t state) {
+    if (channel >= 8 || state < -1 || state > 1) return false;
+    simulated[channel] = state >= 0;
+    simulatedState[channel] = state == 1;
+    simulationSince[channel] = uint32_t(millis());
+    MQTT.publishInput(channel, getInput(channel));
+    return true;
+}
+
+bool IOManager::getRawInput(uint8_t channel) const {
+    return channel < 8 ? candidateState[channel] : false;
+}
+
+bool IOManager::inputFiltering(uint8_t channel) const {
+    return channel < 8 && candidateState[channel] != inputState[channel];
 }
 
 bool IOManager::getOutput(uint8_t channel) {

@@ -12,6 +12,7 @@ using byte = uint8_t;
 inline unsigned long clockMs = 0;
 inline unsigned long millis() {return clockMs;}
 constexpr int INPUT = 0;
+constexpr int INPUT_PULLUP = 2;
 inline void pinMode(int,int) {}
 inline int digitalRead(int) {return 0;}
 '''
@@ -67,6 +68,10 @@ int main() {
  assert(!IO.getOutput(1)); // Duplicate command does not restart phase.
  clockMs=1100;Wire.fail=true;Signals.loop();assert(!IO.getOutput(1));
  clockMs=1120;Wire.fail=false;Signals.loop();assert(IO.getOutput(1) && IO.getOutput(7));
+ assert(!Signals.testAspect(7,"Parada"));
+ assert(!Signals.testAspect(0,"Unknown"));
+ assert(Signals.testAspect(0,"ViaLibre"));assert(IO.getOutput(2) && !IO.getOutput(1));
+ assert(Signals.testAspect(0,"Precaucion"));
  Signals.reload();clockMs=1600;Signals.loop();assert(Signals.aspect(0).isEmpty());
  assert(IO.getOutput(1)); // Save stops animation, holds the current physical command.
 }

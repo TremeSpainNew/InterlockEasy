@@ -21,6 +21,7 @@ private:
     bool readingBody = false;
     size_t contentLength = 0;
     String body;
+    bool testRequest = false;
 
     void close();
     void dispatch();
@@ -29,6 +30,7 @@ private:
     void status();
     void config();
     void saveConfig();
+    void testControl();
 };
 
 extern WebManager Web;
