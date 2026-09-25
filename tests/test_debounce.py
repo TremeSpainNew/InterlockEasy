@@ -6,11 +6,14 @@ scope = {'__file__': str(ROOT/'tests/test_relays.py')}
 exec((ROOT/'tests/test_relays.py').read_text().split('TEST =')[0], scope)
 stubs = scope['STUBS'].copy()
 stubs['Arduino.h'] = stubs['Arduino.h'].replace('inline int digitalRead(int) { return 0; }', 'inline int pins[20] = {};\ninline uint32_t clockMs = 0;\ninline int digitalRead(int pin) { return pins[pin]; }').replace('inline unsigned long millis() { return 0; }','inline unsigned long millis() { return clockMs; }')
+stubs['Wire.h'] = stubs['Wire.h'].replace('bool beginOk = true;', 'bool beginOk = true; bool readOk=true; int readValue=0;').replace('return n;', 'return readOk?n:0;').replace('int read() { return 0; }','int read() { return readValue; }')
 source = r'''
+#include "HardwareDefaults.h"
 #include "IOManager.h"
 #include "ConfigManager.h"
 #include "MqttManager.h"
 #include <cassert>
+#include <Wire.h>
 #include <vector>
 #include <utility>
 ConfigManager Config;
@@ -24,6 +27,7 @@ void tick(uint32_t time) {
  clockMs=time; IO.loop();
 }
 int main() {
+ setupHardware();
  for (auto& input : Config.inputs) input.inverted = false;
  IO.begin();
  pins[4]=1;tick(5);
@@ -54,12 +58,21 @@ int main() {
  assert(IO.simulateInput(0,1));clockMs+=60000;IO.loop();
  assert(!IO.inputSimulated(0) && !IO.getInput(0));
  assert(!IO.simulateInput(8,1) && !IO.simulateInput(0,2));
+ Hardware.modules={{ModuleType::PCF8575,32}};
+ Hardware.inputs={{0,0,false,true}};Hardware.outputs.clear();
+ Config.inputs.resize(1);Config.outputs.clear();
+ Wire.readValue=1;IO=IOManager{};IO.begin();assert(IO.inputReady(0) && !IO.getInput(0));
+ auto before=events.size();Wire.readOk=false;tick(clockMs+5);
+ assert(!IO.inputReady(0) && events.size()==before);
+ Wire.readOk=true;Wire.readValue=0;tick(clockMs+5);
+ assert(!IO.inputReady(0));tick(clockMs+45);assert(!IO.inputReady(0));
+ tick(clockMs+5);assert(IO.inputReady(0) && IO.getInput(0) && events.size()==before+1);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='interlock-debounce-') as directory:
  p=Path(directory)
  for name,value in stubs.items(): (p/name).write_text(value)
  (p/'test.cpp').write_text(source)
- subprocess.run(['c++','-std=c++17',f'-I{p}',f'-I{ROOT / "src"}',str(ROOT/'src/IOManager.cpp'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+ subprocess.run(['c++','-std=c++17',f'-I{p}',f'-I{ROOT / "src"}',str(ROOT/'src/IOManager.cpp'),str(ROOT/'src/HardwareIO.cpp'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 print('OK: bouncing ON/OFF, independent intervals, inversion, refresh, disabled filter and timer rollover')

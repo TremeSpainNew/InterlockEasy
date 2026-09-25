@@ -17,7 +17,8 @@ int main(){
  q.set(0,false);assert(q.next(1101)==0); // latest state replaces failed value
  q.clear(0);q.set(7,true);assert(q.next(0xfffffff0U)==7);
  assert(q.next(0x10U)==-1);assert(q.next(0x400U)==7);
- q.set(8,true);assert(!q.pending(8));
+ q.set(31,true);assert(q.pending(31));
+ q.set(32,true);assert(!q.pending(32));
 }
 '''
 with tempfile.TemporaryDirectory() as directory:

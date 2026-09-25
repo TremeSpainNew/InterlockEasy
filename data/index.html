@@ -7,9 +7,9 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header><div class="brand"><span class="brand-mark" aria-hidden="true">IE</span><div><strong>Interlock Easy</strong><small>Control de entradas y salidas</small></div></div><nav aria-label="Navegación principal"><a href="/index.html" aria-current="page">Resumen</a><a href="/mqtt.html">MQTT</a><a href="/inputs.html">Entradas</a><a href="/outputs.html">Salidas</a><a href="/signals.html">Señales</a></nav></header>
+<header><div class="brand"><span class="brand-mark" aria-hidden="true">IE</span><div><strong>Interlock Easy</strong><small>Control de entradas y salidas</small></div></div><nav aria-label="Navegación principal"><a href="/index.html" aria-current="page">Resumen</a><a href="/mqtt.html">MQTT</a><a href="/inputs.html">Entradas</a><a href="/outputs.html">Salidas</a><a href="/signals.html">Señales</a><a href="/hardware.html">Hardware</a></nav></header>
 <main id="overview">
-<div class="hero"><div><p class="eyebrow">Panel de control</p><h1>Tu instalación, de un vistazo.</h1><p>Entradas y relés conectados por MQTT.</p></div><span class="device-tag">ESP32-S3 · 8 DI / 8 RO</span></div>
+<div class="hero"><div><p class="eyebrow">Panel de control</p><h1>Tu instalación, de un vistazo.</h1><p>Entradas y relés conectados por MQTT.</p></div><span class="device-tag" id="hardware-count">Hardware configurable</span></div>
 <div class="note" id="connection" role="status">Conectando con el módulo…</div>
 <div class="note">Pruebas: ON/OFF acciona los relés físicos. Las entradas se simulan durante 60 segundos o hasta pulsar «Lectura física» y publican por MQTT si están habilitadas. Los mandos MQTT siguen activos. Las señales se prueban mediante sus aspectos.</div>
 <p id="test-feedback" role="status" aria-live="polite"></p>
@@ -19,11 +19,11 @@
 <p>MQTT: <strong id="mqtt">—</strong></p>
 <p>Relés: <strong id="relays">—</strong></p>
 </div>
-<div class="section-head"><h2>Entradas digitales</h2><span class="count">8 canales · DI1–DI8</span></div>
+<div class="section-head"><h2>Entradas digitales</h2><span class="count" id="input-count">Consultando canales…</span></div>
 <div class="grid" id="inputs"></div>
 <div class="section-head" id="signal-section"><div><h2>Señales</h2><p class="muted">Aspectos y focos asignados a cada señal.</p></div><a href="/signals.html">Configurar señales →</a></div>
 <div class="grid" id="signals"><p>Sin señales configuradas.</p></div>
-<div class="section-head" id="output-section"><h2>Salidas de relé</h2><span class="count">8 canales · RO1–RO8</span></div>
+<div class="section-head" id="output-section"><h2>Salidas de relé</h2><span class="count" id="output-count">Consultando canales…</span></div>
 <p class="muted">Las salidas muestran el último mando aceptado por el controlador, sin confirmación de los contactos físicos.</p>
 <div class="grid" id="outputs"></div>
 

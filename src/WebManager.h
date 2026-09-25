@@ -22,6 +22,7 @@ private:
     size_t contentLength = 0;
     String body;
     bool testRequest = false;
+    bool hardwareRequest = false;
 
     void close();
     void dispatch();
@@ -31,6 +32,8 @@ private:
     void config();
     void saveConfig();
     void testControl();
+    void hardwareConfig();
+    void saveHardwareConfig();
 };
 
 extern WebManager Web;

@@ -4,8 +4,8 @@
 #include <ArduinoJson.h>
 #include <vector>
 
-#define NUM_INPUTS 8
-#define NUM_OUTPUTS 8
+#define NUM_INPUTS (Config.inputs.size())
+#define NUM_OUTPUTS (Config.outputs.size())
 
 struct InputConfig {
     bool enabled = false;
@@ -46,7 +46,7 @@ struct MQTTConfig {
 
 struct SignalLight {
     String name;
-    uint8_t relay = 1; // Physical RO number, 1..8.
+    uint8_t relay = 1; // Logical RO number, 1..32.
 };
 struct SignalAspect {
     String value;
@@ -61,9 +61,9 @@ struct SignalConfig {
     uint16_t blinkMs = 500; // Duration of each ON/OFF phase.
     std::vector<SignalLight> lights;
     std::vector<SignalAspect> aspects;
-    uint8_t relayMask() const {
-        uint8_t mask = 0;
-        for (const auto& light : lights) mask |= uint8_t(1U << (light.relay - 1));
+    uint32_t relayMask() const {
+        uint32_t mask = 0;
+        for (const auto& light : lights) mask |= (uint32_t(1) << (light.relay - 1));
         return mask;
     }
 };
@@ -73,8 +73,8 @@ public:
     MQTTConfig mqtt;
     std::vector<SignalConfig> signals;
     bool relayAssigned(uint8_t channel) const;
-    InputConfig inputs[NUM_INPUTS];
-    OutputConfig outputs[NUM_OUTPUTS];
+    std::vector<InputConfig> inputs = std::vector<InputConfig>(8);
+    std::vector<OutputConfig> outputs = std::vector<OutputConfig>(8);
 
     void begin();
     void load();

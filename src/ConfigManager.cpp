@@ -8,9 +8,36 @@ void ConfigManager::begin() {
     load();
     String stored = prefs.getString("config_v1", "");
     if (!stored.isEmpty()) {
-        DynamicJsonDocument doc(32768);
+        DynamicJsonDocument doc(65536);
         String error;
-        if (deserializeJson(doc, stored) || !applyJson(doc.as<JsonVariantConst>(), error, false))
+        if (deserializeJson(doc, stored)) {
+            Serial.println("ERROR: JSON NVS no valido."); return;
+        }
+        // Keep channel settings by logical index when hardware is expanded/reduced.
+        if (doc["inputs"].is<JsonArray>() && doc["outputs"].is<JsonArray>() &&
+            (doc["inputs"].size()!=inputs.size() || doc["outputs"].size()!=outputs.size())) {
+            DynamicJsonDocument resized(65536);
+            toJson(resized,true);
+            resized["mqtt"].set(doc["mqtt"]);
+            if (doc.containsKey("signals")) resized["signals"].set(doc["signals"]);
+            for (const char* key : {"inputs","outputs"}) {
+                const size_t count = key[0]=='i' ? inputs.size() : outputs.size();
+                for (size_t i=0;i<count && i<doc[key].size();++i) resized[key][i].set(doc[key][i]);
+            }
+            JsonArray list=resized["signals"].as<JsonArray>();
+            for (size_t i=list.size();i>0;--i) {
+                bool removed=false;
+                for (JsonObject light:list[i-1]["lights"].as<JsonArray>())
+                    if(light["relay"].as<unsigned int>()>outputs.size())removed=true;
+                if(removed)list.remove(i-1);
+            }
+            if (resized.overflowed() || !applyJson(resized.as<JsonVariantConst>(), error, false)) {
+                Serial.println("ERROR: no se pudo adaptar la configuracion NVS."); return;
+            }
+            Serial.println("NVS adaptada al numero de canales; revisar canales y senales antes de operar.");
+            return;
+        }
+        if (doc.overflowed() || !applyJson(doc.as<JsonVariantConst>(), error, false))
             Serial.println("ERROR: configuracion NVS no valida; se conserva la configuracion anterior.");
     }
 }
@@ -23,7 +50,7 @@ void ConfigManager::load() {
     mqtt.password = prefs.getString("mqtt_pass", "");
     mqtt.keepAlive = prefs.getUShort("mqtt_keep", 30);
 
-    for (int i = 0; i < NUM_INPUTS; i++) {
+    for (int i = 0; i < inputs.size(); i++) {
         String p = "i" + String(i);
         inputs[i].enabled = prefs.getBool((p + "e").c_str(), false);
         inputs[i].name = prefs.getString((p + "n").c_str(), "");
@@ -34,7 +61,7 @@ void ConfigManager::load() {
         inputs[i].retain = prefs.getBool((p + "ret").c_str(), true);
     }
 
-    for (int i = 0; i < NUM_OUTPUTS; i++) {
+    for (int i = 0; i < outputs.size(); i++) {
         String p = "o" + String(i);
         outputs[i].enabled = prefs.getBool((p + "e").c_str(), false);
         outputs[i].name = prefs.getString((p + "n").c_str(), "");
@@ -60,7 +87,7 @@ void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
     m["passwordSet"] = !mqtt.password.isEmpty();
     m["keepAlive"] = mqtt.keepAlive;
     JsonArray inputsArray = doc.createNestedArray("inputs");
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < inputs.size(); ++i) {
         JsonObject item = inputsArray.createNestedObject();
         item["enabled"] = inputs[i].enabled;
         item["name"] = inputs[i].name;
@@ -73,7 +100,7 @@ void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
         item["retain"] = inputs[i].retain;
     }
     JsonArray outputsArray = doc.createNestedArray("outputs");
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < outputs.size(); ++i) {
         JsonObject item = outputsArray.createNestedObject();
         item["enabled"] = outputs[i].enabled;
         item["name"] = outputs[i].name;
@@ -118,7 +145,7 @@ void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
 }
 
 bool ConfigManager::save() {
-    DynamicJsonDocument doc(32768);
+    DynamicJsonDocument doc(65536);
     toJson(doc, true);
     if (doc.overflowed()) return false;
     String value;
@@ -144,11 +171,11 @@ bool topicField(const String& topic) {
 bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist) {
     error = "Configuracion incompleta o valores no validos.";
     if (!doc.is<JsonObjectConst>() || !doc["mqtt"].is<JsonObjectConst>() ||
-        !doc["inputs"].is<JsonArrayConst>() || doc["inputs"].size() != 8 ||
-        !doc["outputs"].is<JsonArrayConst>() || doc["outputs"].size() != 8) return false;
+        !doc["inputs"].is<JsonArrayConst>() || doc["inputs"].size() != inputs.size() ||
+        !doc["outputs"].is<JsonArrayConst>() || doc["outputs"].size() != outputs.size()) return false;
     MQTTConfig nextMqtt;
-    InputConfig nextInputs[8];
-    OutputConfig nextOutputs[8];
+    std::vector<InputConfig> nextInputs(inputs.size());
+    std::vector<OutputConfig> nextOutputs(outputs.size());
     error = "Broker MQTT: comprueba tipos, longitudes, puerto, Client ID y keep alive.";
     auto m = doc["mqtt"];
     if (!textField(m["host"], 128) || !textField(m["clientId"], 64) ||
@@ -165,7 +192,7 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
     nextMqtt.keepAlive = m["keepAlive"].as<uint16_t>();
     if (nextMqtt.clientId.isEmpty() || nextMqtt.host.indexOf(' ') >= 0 ||
         nextMqtt.host.indexOf('/') >= 0) return false;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < inputs.size(); ++i) {
         error = "DI" + String(i + 1) + ": campos no validos, topic vacio o payloads iguales.";
         auto item = doc["inputs"][i];
         if (!item.is<JsonObjectConst>()) return false;
@@ -199,7 +226,7 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
         if (c.payloadOn == c.payloadOff) return false;
         if (!topicField(c.topic) || (c.enabled && c.topic.isEmpty())) return false;
     }
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < outputs.size(); ++i) {
         error = "RO" + String(i + 1) + ": campos no validos, topics vacios o payloads iguales.";
         auto item = doc["outputs"][i];
         if (!item.is<JsonObjectConst>()) return false;
@@ -270,7 +297,7 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
     if (!doc.containsKey("signals") && !signals.empty()) return false;
     if (doc.containsKey("signals")) {
         if (!doc["signals"].is<JsonArrayConst>() || doc["signals"].size() > 8) return false;
-        uint8_t reserved = 0;
+        uint32_t reserved = 0;
         for (JsonObjectConst item : doc["signals"].as<JsonArrayConst>()) {
             if (!item["enabled"].is<bool>() || !textField(item["name"], 64) ||
                 !textField(item["topic"], 128) || !textField(item["jsonPath"], 64) ||
@@ -289,12 +316,12 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
                 if (!item["blinkMs"].is<unsigned int>() || item["blinkMs"].as<unsigned int>() < 250 || item["blinkMs"].as<unsigned int>() > 10000) return false;
                 signal.blinkMs = item["blinkMs"].as<uint16_t>();
             }
-            uint8_t mask = 0;
+            uint32_t mask = 0;
             for (JsonObjectConst light : item["lights"].as<JsonArrayConst>()) {
                 if (!textField(light["name"], 32) || !light["relay"].is<unsigned int>() ||
-                    light["relay"].as<unsigned int>() < 1 || light["relay"].as<unsigned int>() > 8) return false;
+                    light["relay"].as<unsigned int>() < 1 || light["relay"].as<unsigned int>() > outputs.size()) return false;
                 SignalLight entry; entry.name = light["name"].as<String>(); entry.relay = light["relay"].as<uint8_t>();
-                uint8_t bit = uint8_t(1U << (entry.relay - 1));
+                uint32_t bit = uint32_t(1) << (entry.relay - 1);
                 if (mask & bit) { error = "Una senal no puede repetir un rele entre focos."; return false; }
                 mask |= bit; signal.lights.push_back(entry);
             }
@@ -323,7 +350,7 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
             if (signal.enabled) {
                 if (mask & reserved) { error = "Dos senales habilitadas comparten reles."; return false; }
                 reserved |= mask;
-                for (int i = 0; i < 8; ++i) if ((mask & (1U << i)) && nextOutputs[i].enabled) {
+                for (int i = 0; i < outputs.size(); ++i) if ((mask & (1U << i)) && nextOutputs[i].enabled) {
                     error = "Deshabilita el mando individual de los reles asignados a una senal."; return false;
                 }
                 for (const auto& input : nextInputs) if (input.enabled && input.topic == signal.topic) {
@@ -338,7 +365,7 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
     }
     // Persist a complete snapshot before changing the live configuration.
     if (persist) {
-        DynamicJsonDocument saved(32768);
+        DynamicJsonDocument saved(65536);
         saved.set(doc);
         saved["mqtt"]["password"] = nextMqtt.password;
         saved["mqtt"].remove("passwordSet");
@@ -352,13 +379,13 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
     }
     signals = std::move(nextSignals);
     mqtt = nextMqtt;
-    for (int i = 0; i < 8; ++i) { inputs[i] = nextInputs[i]; outputs[i] = nextOutputs[i]; }
+    inputs = std::move(nextInputs); outputs = std::move(nextOutputs);
     error = "";
     return true;
 }
 
 bool ConfigManager::relayAssigned(uint8_t channel) const {
-    if (channel >= 8) return false;
+    if (channel >= outputs.size()) return false;
     for (const auto& signal : signals)
         if (signal.enabled && (signal.relayMask() & (1U << channel))) return true;
     return false;

@@ -1,7 +1,15 @@
 # Interlock Easy
 
 Firmware base para un módulo de entradas/salidas MQTT orientado a enclavamientos,
-basado en la Waveshare ESP32-S3-ETH-8DI-8RO.
+con hardware configurable y perfil inicial para Waveshare ESP32-S3-ETH-8DI-8RO.
+
+## Hardware configurable
+
+Edita `data/config.json` o abre **Hardware** en la web para definir de 0 a 32 entradas y de 0 a 32 relés,
+mezclando GPIO, TCA9554, PCF8574, PCF8575 y MCP23017. El resumen, MQTT,
+las señales y los formularios usan los canales configurados.
+Consulta [el formato y los ejemplos](examples/README.md) antes de cambiar el mapa.
+El cableado descrito a continuación corresponde al perfil Waveshare incluido.
 
 ## Filosofía
 
@@ -111,12 +119,12 @@ El servidor HTTP escucha en el puerto 80 de la IP Ethernet asignada por DHCP.
 Sirve desde LittleFS el resumen (`/` y `/index.html`), las páginas de
 configuración y los recursos compartidos CSS/JS. El resumen consulta `GET /api/status`
 cada segundo, después de completar la petición anterior, y marca «Sin datos»
-si pierde la conexión. Muestra las ocho entradas, las ocho salidas, la IP,
+si pierde la conexión. Muestra las entradas y salidas configuradas, la IP,
 la conexión MQTT y la disponibilidad del controlador de relés.
 
 La API devuelve `uptimeMs`, `ethernet` (`connected`, `ip`), `mqtt`
 (`connected`, `configured`), `filesystemReady`, `outputsReady`, `inputs`
-y `outputs`. Cada canal incluye `channel` (1..8), `name`, `enabled`
+y `outputs`. Cada canal incluye `channel` (1..N, hasta 32), `name`, `enabled`
 (habilitación MQTT) y `state`. Las salidas tienen `state: null` cuando
 el controlador no se ha inicializado. No se exponen credenciales.
 
@@ -149,7 +157,7 @@ La navegación se divide en cinco páginas:
 
 - `/index.html`: resumen de conexiones, entradas, salidas y señales.
 - `/mqtt.html`: broker y credenciales.
-- `/inputs.html`: configuración de DI1–DI8, JSON, inversión y antirrebote.
+- `/inputs.html`: configuración de las entradas, JSON, inversión y antirrebote.
 - `/outputs.html`: configuración de salidas independientes.
 - `/signals.html`: focos, relés, aspectos y parpadeo.
 
@@ -184,8 +192,8 @@ un canal deshabilita su uso por MQTT, no fuerza su salida a OFF.
   la casilla de borrado permite eliminarla explícitamente.
 
 `POST /api/config` requiere `Content-Type: application/json`, `Content-Length`
-y `X-Interlock: 1`. El cuerpo (máximo 24576 bytes) tiene los mismos campos que
-GET, con ocho elementos en `inputs` y ocho en `outputs`. El guardado responde
+y `X-Interlock: 1`. El cuerpo (máximo 57344 bytes) tiene los mismos campos que
+GET, con tantos elementos en `inputs` y `outputs` como canales del perfil de hardware. El guardado responde
 `{"saved":true}`; los errores de validación o persistencia se muestran en la web.
 No hay autenticación HTTP ni TLS: el editor está disponible para los clientes
 que puedan acceder a la red del módulo. La cabecera adicional bloquea formularios
@@ -265,7 +273,7 @@ API `POST /api/test`, con JSON y `X-Interlock: 1`:
 - `{"type":"input","channel":1,"state":null}`: restaurar DI1 física.
 - `{"type":"signal","channel":1,"aspect":"VíaLibre"}`: probar el aspecto de la primera señal.
 
-Los canales son 1..8. Una señal conserva el aspecto de prueba hasta otro mando,
+Los canales de entrada y relé son 1..N (hasta 32); los índices de señal son 1..8. Una señal conserva el aspecto de prueba hasta otro mando,
 reinicio o cambio de configuración; los relés no tienen apagado temporizado.
 La respuesta `{"applied":true}` confirma aplicación, no realimentación física.
 
@@ -310,7 +318,7 @@ independientes, inversión, reconexión, filtro desactivado y desbordamiento del
 Una señal agrupa de 1 a 8 focos, cada uno asignado a un RO físico diferente.
 En **Configuración → Señales de varios focos → Añadir señal**, define nombre,
 topic, campo JSON (`Aspecto` por defecto), focos y aspectos. Se permiten hasta
-8 señales y 12 aspectos por señal, dentro de los 8 relés disponibles en la placa.
+8 señales y 12 aspectos por señal, dentro de los relés disponibles en el perfil de hardware (hasta 32).
 
 Cada aspecto define para cada foco **Apagado**, **Fijo** o **Parpadeo**. El valor
 se escribe como texto sin comillas, respetando acentos y mayúsculas. Por ejemplo,
@@ -348,7 +356,7 @@ confirmación óptica o de los contactos físicos.
 
 La API añade `signals`, una lista opcional en configuraciones antiguas. Cada señal
 incluye `enabled`, `name`, `topic`, `jsonPath`, `blinkMs`, `lights` (`name`, `relay`
-1..8) y `aspects` (`value`, `on`, `blink`). `on` y `blink` contienen números de foco
+1..N, hasta 32) y `aspects` (`value`, `on`, `blink`). `on` y `blink` contienen números de foco
 locales 1..N, no números físicos RO. No pueden solaparse. Para eliminar todas las
 señales se envía `signals: []`; omitir el campo si ya hay señales se rechaza.
 

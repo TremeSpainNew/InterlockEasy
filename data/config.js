@@ -7,6 +7,7 @@
   const load = document.getElementById('load-config');
   const save = document.getElementById('save-config');
   let controls = null;
+  let outputCount = 0;
   let busy = false;
   let signalEditors = [];
   const common = [['enabled','MQTT habilitado','checkbox'],['name','Nombre','text',64],['payloadJson','Payloads en formato JSON','checkbox'],['payloadOn','Payload ON / activo','textarea',256],['payloadOff','Payload OFF / inactivo','textarea',256],['retain','Retener estado en el broker','checkbox']];
@@ -46,8 +47,8 @@
     function addLight(item = {name:'Foco ' + (lights.length + 1), relay:lights.length + 1}) {
       if (lights.length >= 8) return;
       const row = document.createElement('fieldset'); lightsArea.append(row);
-      const c = fields(row, [['name','Foco ' + (lights.length + 1),'text',32],['relay','Relé RO (1–8)','number']], item);
-      c.relay.min = 1; c.relay.max = 8;
+      const c = fields(row, [['name','Foco ' + (lights.length + 1),'text',32],['relay','Relé RO (1–' + outputCount + ')','number']], item);
+      c.relay.min = 1; c.relay.max = outputCount;
       lights.push({row,c});
       aspects.forEach(a => addCell(a, lights.length - 1, 'off'));
     }
@@ -95,7 +96,8 @@
     lock(true); message.textContent = 'Cargando…';
     try {
       const data = await request();
-      if (!data.mqtt || !Array.isArray(data.inputs) || data.inputs.length !== 8 || !Array.isArray(data.outputs) || data.outputs.length !== 8) throw new Error('Configuración no válida.');
+      if (!data.mqtt || !Array.isArray(data.inputs) || data.inputs.length > 32 || !Array.isArray(data.outputs) || data.outputs.length > 32) throw new Error('Configuración no válida.');
+      outputCount = data.outputs.length;
       container.replaceChildren();
       const broker = document.createElement('fieldset');
       const legend = document.createElement('legend'); legend.textContent = 'Broker MQTT'; broker.append(legend); if (page === 'mqtt' || page === 'all') container.append(broker);
@@ -137,7 +139,7 @@
     for (const signal of data.signals) {
       const local = new Set();
       for (const light of signal.lights) {
-        if (!Number.isInteger(light.relay) || light.relay < 1 || light.relay > 8 || local.has(light.relay) || (signal.enabled && reserved.has(light.relay))) {message.textContent = "Revisa los relés de las señales: deben ser válidos y exclusivos."; return;}
+        if (!Number.isInteger(light.relay) || light.relay < 1 || light.relay > outputCount || local.has(light.relay) || (signal.enabled && reserved.has(light.relay))) {message.textContent = "Revisa los relés de las señales: deben ser válidos y exclusivos."; return;}
         local.add(light.relay);
         if (signal.enabled) {reserved.add(light.relay); data.outputs[light.relay-1].enabled = false;}
       }

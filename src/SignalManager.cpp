@@ -16,9 +16,9 @@ bool SignalManager::apply(uint8_t index, uint8_t aspectIndex, bool phase) {
     const auto& signal = Config.signals[index];
     const auto& aspect = signal.aspects[aspectIndex];
     const uint8_t local = aspect.mask | (phase ? aspect.blink : 0);
-    uint8_t physical = 0;
+    uint32_t physical = 0;
     for (size_t i = 0; i < signal.lights.size(); ++i)
-        if (local & (1U << i)) physical |= uint8_t(1U << (signal.lights[i].relay - 1));
+        if (local & (1U << i)) physical |= (uint32_t(1) << (signal.lights[i].relay - 1));
     return IO.setOutputs(signal.relayMask(), physical);
 }
 void SignalManager::command(const String& topic, const String& payload) {

@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "inputCount": 8,
+  "outputCount": 8,
+  "i2c": {
+    "sda": 42,
+    "scl": 41
+  },
+  "ethernet": {
+    "type": "w5500",
+    "sclk": 15,
+    "miso": 14,
+    "mosi": 13,
+    "cs": 16
+  },
+  "modules": [
+    {
+      "type": "gpio"
+    },
+    {
+      "type": "tca9554",
+      "address": 32
+    }
+  ],
+  "inputs": [
+    {
+      "module": 0,
+      "pin": 4,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 5,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 6,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 7,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 8,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 9,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 10,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 11,
+      "pullup": true
+    }
+  ],
+  "outputs": [
+    {
+      "module": 1,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 7,
+      "activeLow": false
+    }
+  ]
+}

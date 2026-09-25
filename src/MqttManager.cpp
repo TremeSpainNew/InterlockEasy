@@ -46,7 +46,7 @@ void MqttManager::reconnect() {
         Serial.println("MQTT conectado");
         subscribeOutputs();
         IO.refreshInputs();
-        for (uint8_t i = 0; i < NUM_INPUTS; ++i) publishInput(i, IO.getInput(i));
+        for (uint8_t i = 0; i < NUM_INPUTS; ++i) if (IO.inputReady(i)) publishInput(i, IO.getInput(i));
         if (IO.outputsReady())
             for (uint8_t i = 0; i < NUM_OUTPUTS; ++i) publishOutput(i, IO.getOutput(i));
     } else {

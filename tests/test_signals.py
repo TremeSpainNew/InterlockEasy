@@ -12,6 +12,8 @@ using byte = uint8_t;
 inline unsigned long clockMs = 0;
 inline unsigned long millis() {return clockMs;}
 constexpr int INPUT = 0;
+constexpr int OUTPUT = 1, HIGH = 1, LOW = 0;
+inline void digitalWrite(int,int) {}
 constexpr int INPUT_PULLUP = 2;
 inline void pinMode(int,int) {}
 inline int digitalRead(int) {return 0;}
@@ -26,12 +28,18 @@ struct WireStub {
  void setTimeOut(int) {}
  void beginTransmission(uint8_t) {values.clear();}
  void write(uint8_t v) {values.push_back(v);}
- uint8_t endTransmission() {return fail?2:0;}
+ uint8_t requestFrom(uint8_t,uint8_t n) {return n;}
+ int read() {return 0;}
+ uint8_t endTransmission(bool = true) {return fail?2:0;}
 };
 inline WireStub Wire;
 '''
+scope2={'__file__':str(ROOT/'tests/test_relays.py')}
+exec((ROOT/'tests/test_relays.py').read_text().split('TEST =')[0],scope2)
+stubs['HardwareDefaults.h']=scope2['STUBS']['HardwareDefaults.h']
 test = r'''
 #include "ConfigManager.h"
+#include "HardwareDefaults.h"
 #include "IOManager.h"
 #include "SignalManager.h"
 #include "MqttManager.h"
@@ -41,6 +49,7 @@ MqttManager MQTT;
 void MqttManager::publishInput(uint8_t,bool) {}
 void MqttManager::publishOutput(uint8_t,bool) {}
 int main() {
+ setupHardware();
  IO.begin();
  IO.setOutput(7,true);
  SignalConfig signal; signal.name="S1";signal.enabled=true;signal.topic="s1";
@@ -74,12 +83,19 @@ int main() {
  assert(Signals.testAspect(0,"Precaucion"));
  Signals.reload();clockMs=1600;Signals.loop();assert(Signals.aspect(0).isEmpty());
  assert(IO.getOutput(1)); // Save stops animation, holds the current physical command.
+ Hardware.modules={{ModuleType::PCF8575,32},{ModuleType::PCF8575,33}};
+ Hardware.inputs.clear();Hardware.outputs.clear();Config.inputs.clear();Config.outputs.resize(32);
+ for(uint8_t i=0;i<32;++i)Hardware.outputs.push_back({uint8_t(i/16),uint8_t(i%16),true,false});
+ Config.signals[0].lights[2].relay=32;
+ IO.begin();assert(Signals.testAspect(0,"ViaLibre"));assert(IO.getOutput(31) && !IO.getOutput(2));
+ IO.setOutput(31,false);assert(IO.getOutput(31)); // High relay bit is also reserved.
+ assert(Signals.testAspect(0,"Parada"));assert(!IO.getOutput(31) && IO.getOutput(0));
 }
 '''
 with tempfile.TemporaryDirectory(prefix='interlock-signals-') as directory:
  p=Path(directory)
  for name,content in stubs.items(): (p/name).write_text(content)
  (p/'test.cpp').write_text(test)
- subprocess.run(['c++','-std=c++17',f'-I{p}',f'-I{ROOT / "src"}',f'-I{ROOT / ".pio/libdeps/esp32-s3-devkitc-1/ArduinoJson/src"}',*[str(ROOT/'src'/name) for name in ['ConfigManager.cpp','IOManager.cpp','SignalManager.cpp']],str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+ subprocess.run(['c++','-std=c++17',f'-I{p}',f'-I{ROOT / "src"}',f'-I{ROOT / ".pio/libdeps/esp32-s3-devkitc-1/ArduinoJson/src"}',*[str(ROOT/'src'/name) for name in ['ConfigManager.cpp','IOManager.cpp','HardwareIO.cpp','SignalManager.cpp']],str(p/'test.cpp'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 print('OK: signal aspects, exclusive relays, grouped writes, blink phases and I2C failure/retry')

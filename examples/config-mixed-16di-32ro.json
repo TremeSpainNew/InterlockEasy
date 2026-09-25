@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "inputCount": 16,
+  "outputCount": 32,
+  "i2c": {
+    "sda": 42,
+    "scl": 41
+  },
+  "ethernet": {
+    "type": "w5500",
+    "sclk": 15,
+    "miso": 14,
+    "mosi": 13,
+    "cs": 16
+  },
+  "modules": [
+    {
+      "type": "pcf8575",
+      "address": 32
+    },
+    {
+      "type": "mcp23017",
+      "address": 33
+    },
+    {
+      "type": "pcf8574",
+      "address": 34
+    },
+    {
+      "type": "tca9554",
+      "address": 35
+    }
+  ],
+  "inputs": [
+    {
+      "module": 0,
+      "pin": 0,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 1,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 2,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 3,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 4,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 5,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 6,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 7,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 8,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 9,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 10,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 11,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 12,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 13,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 14,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 15,
+      "pullup": true
+    }
+  ],
+  "outputs": [
+    {
+      "module": 1,
+      "pin": 0,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 1,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 2,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 3,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 4,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 5,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 6,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 7,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 8,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 9,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 10,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 11,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 12,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 13,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 14,
+      "activeLow": true
+    },
+    {
+      "module": 1,
+      "pin": 15,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 0,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 1,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 2,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 3,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 4,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 5,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 6,
+      "activeLow": true
+    },
+    {
+      "module": 2,
+      "pin": 7,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 0,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 1,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 2,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 3,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 4,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 5,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 6,
+      "activeLow": true
+    },
+    {
+      "module": 3,
+      "pin": 7,
+      "activeLow": true
+    }
+  ]
+}

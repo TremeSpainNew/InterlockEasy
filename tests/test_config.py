@@ -39,6 +39,7 @@ template<> struct Converter<String> {
  static String fromJson(JsonVariantConst v) {return v.as<std::string>();}
  static bool checkJson(JsonVariantConst v) {return v.is<const char*>();}
 };
+
 }
 '''
 }
@@ -46,7 +47,7 @@ TEST = r'''#include "ConfigManager.h"
 #include <cassert>
 int main() {
  Config.begin();
- DynamicJsonDocument d(32768);
+ DynamicJsonDocument d(65536);
  String error;
  Config.toJson(d);
  assert(d["inputs"][0]["debounceMs"]==50);
@@ -139,6 +140,17 @@ int main() {
  s["lights"][1]["relay"]=2;
  s["aspects"][0]["blink"][0]=3;
  assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ Config.inputs.resize(32); Config.outputs.resize(32);
+ Config.toJson(d,true); assert(d["inputs"].size()==32 && d["outputs"].size()==32);
+ d["inputs"][0]["name"]="Keep me";
+ d["signals"][0]["lights"][3]["relay"]=32;
+ assert(Config.applyJson(d.as<JsonVariantConst>(),error));
+ assert(Config.relayAssigned(31));
+ Config.inputs.resize(16); Config.outputs.resize(16); Config.begin();
+ assert(Config.inputs.size()==16 && Config.outputs.size()==16);
+ assert(Config.inputs[0].name=="Keep me" && Config.signals.empty());
+ assert(Config.mqtt.clientId==d["mqtt"]["clientId"].as<String>());
+
 }
 '''
 with tempfile.TemporaryDirectory(prefix='interlock-config-') as directory:

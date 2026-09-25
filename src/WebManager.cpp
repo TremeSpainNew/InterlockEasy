@@ -6,11 +6,12 @@
 #include "SignalManager.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include "HardwareConfig.h"
 
 WebManager Web;
 
 void WebManager::begin() {
-    filesystemReady = LittleFS.begin(false);
+    filesystemReady = Hardware.filesystemReady;
     if (!filesystemReady) Serial.println("LittleFS no disponible: cargar con pio run -t uploadfs.");
     server.begin();
     Serial.println("HTTP disponible en puerto 80.");
@@ -25,6 +26,7 @@ void WebManager::close() {
     responding = false;
     readingBody = false;
     testRequest = false;
+    hardwareRequest = false;
     contentLength = 0;
     body = "";
 
@@ -46,7 +48,9 @@ void WebManager::respond(int code, const char* reason, const char* type, const S
 }
 
 void WebManager::status() {
-    DynamicJsonDocument doc(16384);
+    DynamicJsonDocument doc(32768);
+    doc["inputCount"] = NUM_INPUTS;
+    doc["outputCount"] = NUM_OUTPUTS;
     doc["uptimeMs"] = millis();
     doc["ethernet"]["connected"] = Network.connected();
     doc["ethernet"]["ip"] = Network.ip().toString();
@@ -61,7 +65,7 @@ void WebManager::status() {
         item["channel"] = i + 1;
         item["name"] = Config.inputs[i].name;
         item["enabled"] = Config.inputs[i].enabled;
-        item["state"] = IO.getInput(i);
+        if (IO.inputReady(i)) item["state"] = IO.getInput(i); else item["state"] = nullptr;
         item["simulated"] = IO.inputSimulated(i);
         item["raw"] = IO.getRawInput(i);
         item["filtering"] = IO.inputFiltering(i);
@@ -119,8 +123,9 @@ void WebManager::dispatch() {
     String path = line.substring(first + 1, second);
     const int query = path.indexOf('?');
     if (query >= 0) path.remove(query);
-    if (method == "POST" && (path == "/api/config" || path == "/api/test")) {
+    if (method == "POST" && (path == "/api/config" || path == "/api/test" || path == "/api/hardware")) {
         testRequest = path == "/api/test";
+        hardwareRequest = path == "/api/hardware";
         bool hasLength = false, json = false, token = false;
         for (int pos = end + 2; pos < int(request.length()) - 2;) {
             const int next = request.indexOf("\r\n", pos);
@@ -153,7 +158,7 @@ void WebManager::dispatch() {
             pos = next + 2;
         }
         if (!hasLength || !contentLength) { respond(411, "Length Required", "text/plain", "Falta Content-Length."); return; }
-        if (contentLength > (testRequest ? 512U : 24576U)) { respond(413, "Content Too Large", "text/plain", "Configuracion demasiado grande."); return; }
+        if (contentLength > (testRequest ? 512U : hardwareRequest ? 16384U : 57344U)) { respond(413, "Content Too Large", "text/plain", "Configuracion demasiado grande."); return; }
         if (!json) { respond(415, "Unsupported Media Type", "text/plain", "Se requiere application/json."); return; }
         // A custom header prevents cross-origin HTML forms from changing settings.
         if (!token) { respond(403, "Forbidden", "text/plain", "Falta X-Interlock: 1."); return; }
@@ -164,12 +169,13 @@ void WebManager::dispatch() {
     if (method != "GET") {
         respond(405, "Method Not Allowed", "text/plain", "Metodo no admitido."); return;
     }
+    if (path == "/api/hardware") { hardwareConfig(); return; }
     if (path == "/api/config") { config(); return; }
     if (path == "/api/status") {
         status();
     } else if (path == "/" || path == "/index.html" || path == "/mqtt.html" ||
                path == "/inputs.html" || path == "/outputs.html" || path == "/signals.html" ||
-               path == "/style.css" || path == "/dashboard.js" || path == "/config.js") {
+               path == "/hardware.html" || path == "/hardware.js" || path == "/style.css" || path == "/dashboard.js" || path == "/config.js") {
         const String asset = path == "/" ? String("/index.html") : path;
         if (filesystemReady) file = LittleFS.open(asset.c_str(), "r");
         if (!file) {
@@ -187,7 +193,7 @@ void WebManager::dispatch() {
 }
 
 void WebManager::config() {
-    DynamicJsonDocument doc(32768);
+    DynamicJsonDocument doc(65536);
     Config.toJson(doc);
     if (doc.overflowed()) { respond(500, "Internal Server Error", "text/plain", "Sin memoria."); return; }
     String value;
@@ -196,7 +202,7 @@ void WebManager::config() {
 }
 
 void WebManager::saveConfig() {
-    DynamicJsonDocument doc(32768);
+    DynamicJsonDocument doc(65536);
     String error;
     if (deserializeJson(doc, body)) {
         respond(400, "Bad Request", "text/plain", "JSON no valido o demasiado grande."); return;
@@ -214,11 +220,16 @@ void WebManager::testControl() {
     DynamicJsonDocument doc(1024);
     if (deserializeJson(doc, body) || !doc["type"].is<const char*>() ||
         !doc["channel"].is<unsigned int>() || doc["channel"].as<unsigned int>() < 1 ||
-        doc["channel"].as<unsigned int>() > 8) {
+        doc["channel"].as<unsigned int>() > 32) {
         respond(400, "Bad Request", "text/plain", "Mando de prueba no valido."); return;
     }
     const uint8_t channel = doc["channel"].as<unsigned int>() - 1;
     const String type = doc["type"].as<String>();
+    if ((type == "input" && channel >= NUM_INPUTS) ||
+        (type == "relay" && channel >= NUM_OUTPUTS) ||
+        (type == "signal" && channel >= Config.signals.size())) {
+        respond(400, "Bad Request", "text/plain", "Canal fuera del hardware configurado."); return;
+    }
     bool ok = false;
     if (type == "input" && doc.containsKey("state") && (doc["state"].isNull() || doc["state"].is<bool>())) {
         ok = IO.simulateInput(channel, doc["state"].isNull() ? -1 : doc["state"].as<bool>() ? 1 : 0);
@@ -241,7 +252,8 @@ void WebManager::testControl() {
 
 void WebManager::loop() {
     if (!client) {
-        client = server.accept();
+        // HTTP clients must send a request first. Ignore speculative idle connections.
+        client = server.available();
         if (!client) return;
         client.setConnectionTimeout(100);
         started = millis();
@@ -256,7 +268,9 @@ void WebManager::loop() {
             if (readingBody) {
                 body += char(client.read());
                 if (body.length() == contentLength) {
-                    if (testRequest) testControl(); else saveConfig();
+                    if (testRequest) testControl();
+                    else if (hardwareRequest) saveHardwareConfig();
+                    else saveConfig();
                     body = ""; break;
                 }
                 continue;
@@ -293,4 +307,32 @@ void WebManager::loop() {
         return;
     }
     close();
+}
+
+void WebManager::hardwareConfig() {
+    if (filesystemReady && LittleFS.exists("/config.json")) {
+        file = LittleFS.open("/config.json", "r");
+        if (!file || file.size() > 16384) {
+            if (file) file.close();
+            respond(500, "Internal Server Error", "text/plain", "No se pudo leer config.json."); return;
+        }
+        headers(200, "OK", "application/json; charset=utf-8", file.size());
+        return;
+    }
+    DynamicJsonDocument doc(24576);
+    Hardware.toJson(doc);
+    if (doc.overflowed()) {respond(500, "Internal Server Error", "text/plain", "Sin memoria."); return;}
+    String value; serializeJson(doc, value);
+    respond(200, "OK", "application/json; charset=utf-8", value);
+}
+void WebManager::saveHardwareConfig() {
+    DynamicJsonDocument doc(24576);
+    if (deserializeJson(doc, body)) {
+        respond(400, "Bad Request", "text/plain", "JSON no valido o demasiado grande."); return;
+    }
+    String error;
+    if (!Hardware.saveJson(doc.as<JsonVariantConst>(), error)) {
+        respond(400, "Bad Request", "text/plain; charset=utf-8", error); return;
+    }
+    respond(200, "OK", "application/json", "{\"saved\":true,\"restartRequired\":true}");
 }

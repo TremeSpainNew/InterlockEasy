@@ -1,18 +1,14 @@
 #include "EthernetManager.h"
 
-#define ETH_INT  12
-#define ETH_MOSI 13
-#define ETH_MISO 14
-#define ETH_SCLK 15
-#define ETH_CS   16
+#include "HardwareConfig.h"
 
 EthernetManager Network;
 
 bool EthernetManager::begin() {
     Serial.println("Inicializando Ethernet W5500...");
 
-    SPI.begin(ETH_SCLK, ETH_MISO, ETH_MOSI, ETH_CS);
-    Ethernet.init(ETH_CS);
+    SPI.begin(Hardware.sclk, Hardware.miso, Hardware.mosi, Hardware.cs);
+    Ethernet.init(Hardware.cs);
 
     if (Ethernet.begin(mac) == 0) {
         Serial.println("ERROR: DHCP no disponible.");

@@ -12,25 +12,23 @@ public:
     bool getRawInput(uint8_t channel) const;
     bool inputFiltering(uint8_t channel) const;
     bool getOutput(uint8_t channel);
+    bool inputReady(uint8_t channel) const { return channel < 32 && (simulated[channel] || inputValid[channel]); }
     bool outputsReady() const { return relayReady; }
-    bool setOutputs(uint8_t mask, uint8_t states);
+    bool setOutputs(uint32_t mask, uint32_t states);
     void setOutput(uint8_t channel, bool state);
 
 private:
-    bool simulated[8] = {};
-    bool simulatedState[8] = {};
-    uint32_t simulationSince[8] = {};
-    bool inputState[8] = {}; // Debounced physical levels; inversion is applied on access.
-    bool candidateState[8] = {};
-    uint32_t candidateSince[8] = {};
-    bool outputState[8] = {};
+    bool simulated[32] = {};
+    bool simulatedState[32] = {};
+    uint32_t simulationSince[32] = {};
+    bool inputState[32] = {}; // Debounced physical levels; inversion is applied on access.
+    bool candidateState[32] = {};
+    uint32_t candidateSince[32] = {};
+    bool inputValid[32] = {};
+    bool sampleValid[32] = {};
     bool relayReady = false;
-    uint8_t relayMask = 0;
     uint32_t lastScan = 0;
 
-    bool readInput(uint8_t channel);
-    bool writeRelay(uint8_t channel, bool state);
-    bool writeRelayRegister(uint8_t reg, uint8_t value);
 };
 
 extern IOManager IO;

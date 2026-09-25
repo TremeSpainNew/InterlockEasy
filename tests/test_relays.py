@@ -11,6 +11,8 @@ STUBS = {
 using String = std::string;
 using byte = uint8_t;
 constexpr int INPUT = 0;
+constexpr int OUTPUT = 1, HIGH = 1, LOW = 0;
+inline void digitalWrite(int, int) {}
 constexpr int INPUT_PULLUP = 2;
 inline void pinMode(int, int) {}
 inline int digitalRead(int) { return 0; }
@@ -41,12 +43,22 @@ struct WireStub {
         writes.emplace_back();
     }
     void write(uint8_t value) { writes.back().push_back(value); }
-    uint8_t endTransmission() { return int(writes.size()) == failAt ? 2 : 0; }
+    uint8_t requestFrom(uint8_t, uint8_t n) { return n; }
+    int read() { return 0; }
+    uint8_t endTransmission(bool = true) { return int(writes.size()) == failAt ? 2 : 0; }
 };
 inline WireStub Wire;
 """,
 }
-TEST = """#include "IOManager.h"
+STUBS['HardwareDefaults.h'] = """#include "HardwareConfig.h"
+HardwareConfig Hardware;
+void setupHardware() {
+ Hardware.modules={{ModuleType::GPIO,0},{ModuleType::TCA9554,0x20}};
+ for(uint8_t i=0;i<8;++i){ Hardware.inputs.push_back({0,uint8_t(i+4),false,true}); Hardware.outputs.push_back({1,i,false,false}); }
+}
+"""
+TEST = """#include "HardwareDefaults.h"
+#include "IOManager.h"
 #include "ConfigManager.h"
 #include "MqttManager.h"
 #include <Wire.h>
@@ -61,8 +73,9 @@ void MqttManager::publishOutput(uint8_t channel, bool state) {
 }
 void reset() { Wire = WireStub{}; published.clear(); IO = IOManager{}; }
 int main() {
+    setupHardware();
     reset(); IO.begin();
-    assert((Wire.writes == std::vector<std::vector<uint8_t>>{{1, 0}, {3, 0}}));
+    assert((Wire.writes == std::vector<std::vector<uint8_t>>{{1, 0}, {2, 0}, {3, 0}}));
     for (int i = 0; i < 8; ++i) {
         IO.setOutput(i, true);
         assert(IO.getOutput(i));
@@ -88,7 +101,7 @@ int main() {
     Wire.failAt = int(batch + 1);
     assert(!IO.setOutputs(0x0f, 0x0a));
     assert(IO.getOutput(0) && !IO.getOutput(1));
-    for (int fail = 1; fail <= 2; ++fail) {
+    for (int fail = 1; fail <= 3; ++fail) {
         reset(); Wire.failAt = fail; IO.begin();
         assert(Wire.writes.size() == unsigned(fail));
         IO.setOutput(0, true);
@@ -109,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix="interlock-relays-") as directory:
     subprocess.run([
         "c++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
         f"-I{folder}", f"-I{ROOT / 'src'}",
-        str(ROOT / "src/IOManager.cpp"), str(folder / "test.cpp"),
+        str(ROOT / "src/IOManager.cpp"), str(ROOT / "src/HardwareIO.cpp"), str(folder / "test.cpp"),
         "-o", str(executable),
     ], check=True)
     subprocess.run([str(executable)], check=True)

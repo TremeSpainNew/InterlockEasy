@@ -1,9 +1,14 @@
 
 const byId = id => document.getElementById(id);
 let testBusy = false;
+let refreshTask = null;
+let pollTimer = null;
 async function sendTest(command) {
   if (testBusy) return;
   testBusy = true;
+  clearTimeout(pollTimer);
+  // Let a pending status read finish before issuing a hardware command.
+  if (refreshTask) await refreshTask;
   const feedback = byId('test-feedback');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12000);
@@ -14,14 +19,17 @@ async function sendTest(command) {
     if (feedback) feedback.textContent = 'Prueba aplicada. El estado se actualizará en la siguiente lectura.';
   } catch(error) {
     if (feedback) feedback.textContent = 'No se pudo confirmar la prueba: ' + error.message + '. Comprueba el estado antes de repetir.';
-  } finally {clearTimeout(timer); testBusy = false;}
+  } finally {
+    clearTimeout(timer); testBusy = false;
+    await refresh();
+  }
 }
 function testButton(label, command) {
   const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
   button.disabled = true; button.onclick = () => sendTest(command); return button;
 }
-function createCards(id, prefix, label) {
-  return Array.from({length: 8}, (_, index) => {
+function createCards(id, prefix, label, count) {
+  return Array.from({length: count}, (_, index) => {
     const card = document.createElement('div');
     card.className = 'card';
     const badge = document.createElement('span');
@@ -48,8 +56,7 @@ function createCards(id, prefix, label) {
     return {name, state, enabled, diagnostic, buttons};
   });
 }
-const inputs = createCards('inputs', 'DI', 'Entrada');
-const outputs = createCards('outputs', 'RO', 'Relé');
+let inputs = [], outputs = [];
 function render(cards, values, label, on, off, ready = true) {
   values.forEach((item, i) => {
     cards[i].name.textContent = item.name || label + ' ' + item.channel;
@@ -62,11 +69,18 @@ function render(cards, values, label, on, off, ready = true) {
   });
 }
 function validChannels(items) {
-  return Array.isArray(items) && items.length === 8 && items.every((item, i) =>
+  return Array.isArray(items) && items.length <= 32 && items.every((item, i) =>
     item && item.channel === i + 1 && typeof item.name === 'string' &&
     typeof item.enabled === 'boolean' && (typeof item.state === 'boolean' || item.state === null));
 }
-async function refresh() {
+function refresh() {
+  if (refreshTask) return refreshTask;
+  if (testBusy) return Promise.resolve();
+  clearTimeout(pollTimer);
+  refreshTask = refreshStatus().finally(() => {refreshTask = null;});
+  return refreshTask;
+}
+async function refreshStatus() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 4000);
   try {
@@ -75,6 +89,11 @@ async function refresh() {
     const data = await response.json();
     if (!validChannels(data.inputs) || !validChannels(data.outputs) || !data.ethernet || !data.mqtt)
       throw new Error('Respuesta no válida');
+    if (inputs.length !== data.inputs.length) { byId('inputs').replaceChildren(); inputs = createCards('inputs', 'DI', 'Entrada', data.inputs.length); }
+    if (outputs.length !== data.outputs.length) { byId('outputs').replaceChildren(); outputs = createCards('outputs', 'RO', 'Relé', data.outputs.length); }
+    if (byId('hardware-count')) byId('hardware-count').textContent = data.inputs.length + ' DI / ' + data.outputs.length + ' RO';
+    if (byId('input-count')) byId('input-count').textContent = data.inputs.length + ' canales';
+    if (byId('output-count')) byId('output-count').textContent = data.outputs.length + ' canales';
     render(inputs, data.inputs, 'Entrada', 'Activa', 'Inactiva');
     render(outputs, data.outputs, 'Relé', 'ON', 'OFF', data.outputsReady);
     const signalArea = byId('signals');
@@ -120,7 +139,7 @@ async function refresh() {
     for (const id of ['ip', 'ethernet', 'mqtt', 'relays']) byId(id).textContent = '—';
   } finally {
     clearTimeout(timeout);
-    setTimeout(refresh, 1000);
+    if (!testBusy) pollTimer = setTimeout(refresh, 1000);
   }
 }
 refresh();
