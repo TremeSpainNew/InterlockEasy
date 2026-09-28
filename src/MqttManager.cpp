@@ -5,6 +5,7 @@
 #include "JsonPayload.h"
 #include "SignalManager.h"
 #include "DetectionManager.h"
+#include "TurnoutManager.h"
 
 MqttManager MQTT;
 
@@ -26,11 +27,13 @@ void MqttManager::reconnect(){
             if(IO.inputReady(i)&&!Config.inputAssigned(i))publishInput(i,IO.getInput(i));
         if(IO.outputsReady())for(uint8_t i=0;i<NUM_OUTPUTS;++i)publishOutput(i,IO.getOutput(i));
         Detections.publishAll();
+        Turnouts.publishAllFeedback();
     }else Serial.printf("MQTT error: %d\n",mqtt->state());
 }
 
 void MqttManager::subscribeOutputs(){
     for(const auto& signal:Config.signals)if(signal.enabled)mqtt->subscribe(signal.topic.c_str());
+    for(const auto& turnout:Config.turnouts)if(turnout.enabled)mqtt->subscribe(turnout.commandTopic().c_str());
     for(int i=0;i<NUM_OUTPUTS;i++){auto& c=Config.outputs[i];if(c.enabled&&!c.commandTopic.isEmpty())mqtt->subscribe(c.commandTopic.c_str());}
 }
 void MqttManager::loop(){if(!mqtt)return;if(!mqtt->connected()){reconnect();return;}mqtt->loop();if(mqtt->connected())flushInput();}
@@ -56,6 +59,7 @@ bool MqttManager::publishValue(const String& topic,const String& payload,bool re
 void MqttManager::callback(char* topic,byte* payload,unsigned int length){
     String t(topic),value;if(length>1792)return;for(unsigned int i=0;i<length;i++)value+=(char)payload[i];
     Signals.command(t,value);
+    Turnouts.command(t,value);
     for(int i=0;i<NUM_OUTPUTS;i++){auto& c=Config.outputs[i];if(Config.relayAssigned(i)||!c.enabled||t!=c.commandTopic)continue;
         if(c.payloadJson){DynamicJsonDocument doc(8192);if(deserializeJson(doc,value.c_str(),value.length()))continue;JsonVariantConst selected;
             if(!JsonPayload::select(doc.as<JsonVariantConst>(),c.jsonPath.c_str(),selected))continue;

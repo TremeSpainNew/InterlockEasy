@@ -106,6 +106,9 @@ void ConfigManager::begin() {
         if (doc.containsKey("axleCounters"))
             resized["axleCounters"].set(doc["axleCounters"]);
 
+        if (doc.containsKey("turnouts"))
+            resized["turnouts"].set(doc["turnouts"]);
+
         for (const char* key : {"inputs", "outputs"}) {
             const size_t count =
                 key[0] == 'i' ? inputs.size() : outputs.size();
@@ -143,6 +146,18 @@ void ConfigManager::begin() {
             }
         }
 
+        JsonArray turnoutList = resized["turnouts"].as<JsonArray>();
+        for (size_t i = turnoutList.size(); i > 0; --i) {
+            JsonObject t = turnoutList[i - 1];
+            const unsigned on = t["outputNormal"].as<unsigned int>();
+            const unsigned orv = t["outputReverse"].as<unsigned int>();
+            const unsigned in = t["inputNormal"].as<unsigned int>();
+            const unsigned ir = t["inputReverse"].as<unsigned int>();
+            if (on > outputs.size() || orv > outputs.size() ||
+                in > inputs.size() || ir > inputs.size())
+                turnoutList.remove(i - 1);
+        }
+
         if (resized.overflowed() ||
             !applyJson(resized.as<JsonVariantConst>(), error, false)) {
             Serial.print("ERROR: no se pudo adaptar la configuracion NVS: ");
@@ -163,6 +178,9 @@ void ConfigManager::begin() {
 
     if (!doc.containsKey("axleCounters"))
         doc.createNestedArray("axleCounters");
+
+    if (!doc.containsKey("turnouts"))
+        doc.createNestedArray("turnouts");
 
     if (doc.overflowed() ||
         !applyJson(doc.as<JsonVariantConst>(), error, false)) {
@@ -420,6 +438,27 @@ void ConfigManager::toJson(
         // Informativo para la interfaz.
         item["topic"] = axleTopic(counter);
     }
+
+
+    // ========================================================
+    // AGUJAS / DESVIOS
+    // ========================================================
+    JsonArray turnoutArray = doc.createNestedArray("turnouts");
+    for (const auto& turnout : turnouts) {
+        JsonObject item = turnoutArray.createNestedObject();
+        item["enabled"] = turnout.enabled;
+        item["station"] = turnout.station;
+        item["id"] = turnout.id;
+        item["outputNormal"] = turnout.outputNormal;
+        item["outputReverse"] = turnout.outputReverse;
+        item["inputNormal"] = turnout.inputNormal;
+        item["inputReverse"] = turnout.inputReverse;
+        item["drive"] = turnout.drive == TurnoutDrive::MAINTAINED ? "maintained" : "pulse";
+        item["pulseMs"] = turnout.pulseMs;
+        item["commandTopic"] = turnout.commandTopic();
+        item["feedbackTopic"] = turnout.feedbackTopic();
+    }
+
 }
 
 
@@ -1215,6 +1254,116 @@ bool ConfigManager::applyJson(
     }
 
 
+
+    // ========================================================
+    // AGUJAS / DESVIOS
+    // ========================================================
+    std::vector<TurnoutConfig> nextTurnouts;
+    uint32_t turnoutRelays = 0;
+
+    if (!doc.containsKey("turnouts")) {
+        if (!turnouts.empty()) {
+            error = "Falta la configuracion de agujas.";
+            return false;
+        }
+    } else {
+        if (!doc["turnouts"].is<JsonArrayConst>() ||
+            doc["turnouts"].size() > 16) {
+            error = "Agujas: configuracion no valida (maximo 16).";
+            return false;
+        }
+
+        for (JsonObjectConst item : doc["turnouts"].as<JsonArrayConst>()) {
+            if (!item["enabled"].is<bool>() ||
+                !textField(item["station"],64) ||
+                !textField(item["id"],64) ||
+                !item["outputNormal"].is<unsigned int>() ||
+                !item["outputReverse"].is<unsigned int>() ||
+                !item["inputNormal"].is<unsigned int>() ||
+                !item["inputReverse"].is<unsigned int>() ||
+                !textField(item["drive"],16) ||
+                !item["pulseMs"].is<unsigned int>()) {
+                return false;
+            }
+
+            TurnoutConfig t;
+            t.enabled=item["enabled"].as<bool>();
+            t.station=item["station"].as<String>();
+            t.id=item["id"].as<String>();
+            t.outputNormal=item["outputNormal"].as<uint8_t>();
+            t.outputReverse=item["outputReverse"].as<uint8_t>();
+            t.inputNormal=item["inputNormal"].as<uint8_t>();
+            t.inputReverse=item["inputReverse"].as<uint8_t>();
+            const String drive=item["drive"].as<String>();
+            if (drive=="pulse") t.drive=TurnoutDrive::PULSE;
+            else if (drive=="maintained") t.drive=TurnoutDrive::MAINTAINED;
+            else return false;
+            t.pulseMs=item["pulseMs"].as<uint16_t>();
+
+            if (t.outputNormal<1 || t.outputNormal>outputs.size() ||
+                t.outputReverse<1 || t.outputReverse>outputs.size() ||
+                t.outputNormal==t.outputReverse ||
+                t.pulseMs<50 || t.pulseMs>10000) {
+                error="Aguja: salidas o tiempo de accionamiento no validos.";
+                return false;
+            }
+
+            const bool noFeedback=t.inputNormal==0 && t.inputReverse==0;
+            const bool fullFeedback=t.inputNormal>=1 && t.inputNormal<=inputs.size() &&
+                                    t.inputReverse>=1 && t.inputReverse<=inputs.size() &&
+                                    t.inputNormal!=t.inputReverse;
+            if (!noFeedback && !fullFeedback) {
+                error="Aguja: configura ambas entradas de comprobacion o ninguna.";
+                return false;
+            }
+
+            if (t.enabled) {
+                if (!mqttIdField(t.station) || !mqttIdField(t.id)) {
+                    error="Aguja: estacion e ID no validos.";
+                    return false;
+                }
+
+                const uint32_t relayMask=(uint32_t(1)<<(t.outputNormal-1)) |
+                                         (uint32_t(1)<<(t.outputReverse-1));
+                if (turnoutRelays & relayMask) {
+                    error="Dos agujas habilitadas comparten reles.";
+                    return false;
+                }
+                for (const auto& signal:nextSignals) {
+                    if (signal.enabled && (signal.relayMask() & relayMask)) {
+                        error="Una aguja y una senal habilitadas comparten reles.";
+                        return false;
+                    }
+                }
+                for (size_t r=0;r<nextOutputs.size();++r) {
+                    if ((relayMask&(uint32_t(1)<<r)) && nextOutputs[r].enabled) {
+                        error="Deshabilita el mando individual de los reles asignados a una aguja.";
+                        return false;
+                    }
+                }
+                turnoutRelays |= relayMask;
+
+                if (fullFeedback) {
+                    const uint32_t inputMask=(uint32_t(1)<<(t.inputNormal-1)) |
+                                             (uint32_t(1)<<(t.inputReverse-1));
+                    if (reservedInputs & inputMask) {
+                        error="Una aguja comparte entradas con otro elemento de deteccion.";
+                        return false;
+                    }
+                    reservedInputs |= inputMask;
+                }
+
+                for (const auto& old:nextTurnouts) {
+                    if (old.enabled && old.station==t.station && old.id==t.id) {
+                        error="Dos agujas habilitadas tienen la misma estacion e ID.";
+                        return false;
+                    }
+                }
+            }
+            nextTurnouts.push_back(t);
+        }
+    }
+
     // Las entradas reservadas por CV / CE no pueden publicar tambien
     // como entradas MQTT genericas.
     for (size_t i = 0; i < nextInputs.size(); ++i) {
@@ -1402,6 +1551,9 @@ bool ConfigManager::applyJson(
     axleCounters =
         std::move(nextAxleCounters);
 
+    turnouts =
+        std::move(nextTurnouts);
+
     mqtt =
         nextMqtt;
 
@@ -1431,6 +1583,14 @@ bool ConfigManager::relayAssigned(
         }
     }
 
+    const uint8_t logical = channel + 1;
+    for (const auto& turnout : turnouts) {
+        if (turnout.enabled &&
+            (turnout.outputNormal == logical ||
+             turnout.outputReverse == logical))
+            return true;
+    }
+
     return false;
 }
 
@@ -1456,6 +1616,14 @@ bool ConfigManager::inputAssigned(
         if (counter.enabled &&
             (counter.inputA == logical ||
              counter.inputB == logical)) {
+            return true;
+        }
+    }
+
+    for (const auto& turnout : turnouts) {
+        if (turnout.enabled && turnout.hasFeedback() &&
+            (turnout.inputNormal == logical ||
+             turnout.inputReverse == logical)) {
             return true;
         }
     }

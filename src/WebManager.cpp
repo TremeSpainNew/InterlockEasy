@@ -5,6 +5,7 @@
 #include "MqttManager.h"
 #include "SignalManager.h"
 #include "DetectionManager.h"
+#include "TurnoutManager.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include "HardwareConfig.h"
@@ -76,6 +77,17 @@ void WebManager::status(){
         x["lastEvent"]=s?s->lastEvent:"";x["error"]=s?s->error:false;
     }
 
+    JsonArray turnouts=doc.createNestedArray("turnouts");
+    for(size_t i=0;i<Config.turnouts.size();++i){
+        const auto& c=Config.turnouts[i];const auto* st=Turnouts.state(i);JsonObject x=turnouts.createNestedObject();
+        x["channel"]=i+1;x["enabled"]=c.enabled;x["station"]=c.station;x["id"]=c.id;
+        x["outputNormal"]=c.outputNormal;x["outputReverse"]=c.outputReverse;
+        x["inputNormal"]=c.inputNormal;x["inputReverse"]=c.inputReverse;
+        x["drive"]=c.drive==TurnoutDrive::MAINTAINED?"maintained":"pulse";
+        x["commandTopic"]=c.commandTopic();x["feedbackTopic"]=c.feedbackTopic();
+        x["commanded"]=st?st->commanded:-1;x["feedback"]=st?st->feedback:-2;
+    }
+
     if(doc.overflowed()){respond(500,"Internal Server Error","application/json","{\"error\":\"status capacity exceeded\"}");return;}
     String value;serializeJson(doc,value);respond(200,"OK","application/json; charset=utf-8",value);
 }
@@ -109,7 +121,7 @@ void WebManager::dispatch(){
     if(path=="/api/config"){config();return;}
     if(path=="/api/status"){status();return;}
 
-    if(path=="/"||path=="/index.html"||path=="/mqtt.html"||path=="/inputs.html"||path=="/outputs.html"||path=="/signals.html"||path=="/detection.html"||path=="/hardware.html"||path=="/hardware.js"||path=="/style.css"||path=="/dashboard.js"||path=="/config.js"||path=="/detection.js"){
+    if(path=="/"||path=="/index.html"||path=="/mqtt.html"||path=="/inputs.html"||path=="/outputs.html"||path=="/signals.html"||path=="/detection.html"||path=="/turnouts.html"||path=="/hardware.html"||path=="/hardware.js"||path=="/style.css"||path=="/dashboard.js"||path=="/config.js"||path=="/detection.js"||path=="/turnouts.js"){
         const String asset=path=="/"?String("/index.html"):path;if(filesystemReady)file=LittleFS.open(asset.c_str(),"r");
         if(!file){respond(503,"Service Unavailable","text/plain; charset=utf-8","Interfaz no disponible. Carga LittleFS con: pio run -t uploadfs. API: /api/status");return;}
         const char* type=path.endsWith(".css")?"text/css; charset=utf-8":path.endsWith(".js")?"application/javascript; charset=utf-8":"text/html; charset=utf-8";

@@ -1,23 +1,66 @@
-InterlockEasy - cambio CV / Cuenta-ejes
+INTERLOCK EASY - CV + CUENTA-EJES + DESVIOS
 
-Sustituir:
-src/ConfigManager.h
-src/ConfigManager.cpp
-src/DetectionManager.h
-src/DetectionManager.cpp
-src/MqttManager.cpp
-src/IOManager.cpp
-src/WebManager.cpp
-data/detection.html
-data/detection.js
-data/dashboard.js
-data/index.html
+ARCHIVOS A SUSTITUIR / AÑADIR
 
-No es necesario modificar IOManager.h ni WebManager.h.
+src/
+  ConfigManager.h
+  ConfigManager.cpp
+  DetectionManager.h
+  DetectionManager.cpp
+  TurnoutManager.h        NUEVO
+  TurnoutManager.cpp      NUEVO
+  JsonPayload.h           INCLUIDO
+  MqttManager.cpp
+  IOManager.cpp
+  WebManager.cpp
+  main.cpp
 
-Después:
-1. Compilar firmware.
-2. Subir firmware.
-3. Subir LittleFS: pio run -t uploadfs
-4. La detección antigua trackSections se descarta al migrar.
-5. Reconfigurar CV/CE desde /detection.html.
+data/
+  index.html
+  dashboard.js
+  detection.html
+  detection.js
+  turnouts.html           NUEVO
+  turnouts.js             NUEVO
+  mqtt.html
+  inputs.html
+  outputs.html
+  signals.html
+  hardware.html
+
+PROTOCOLO DE AGUJAS
+
+Mando:
+  aguja/<estacion>/<id>/mando
+  0 = normal
+  1 = invertida
+
+Comprobacion:
+  aguja/<estacion>/<id>/comprobacion
+  0 = normal
+  1 = invertida
+  payload vacio = sin comprobacion valida
+
+FUNCIONAMIENTO
+- Dos RO por aguja: normal / invertida.
+- Dos DI opcionales: comprobacion normal / invertida.
+- Las E/S asignadas quedan reservadas.
+- Accionamiento configurable: impulso o mantenido.
+- En impulso se corta al cumplirse pulseMs o al alcanzarse la comprobacion mandada.
+- Nunca se energizan simultaneamente RO normal e invertida.
+- La comprobacion se publica al cambiar y se refresca cada 30 s.
+- Los mensajes de comprobacion NO usan retain para permitir payload vacio.
+- Guardar configuracion reinicia el modulo.
+
+CV:
+  cv/<estacion>/<id>/field_state
+  {"estado":"LIBRE"} / {"estado":"OCUPADO"}
+
+CE:
+  cejes/<estacion>/<id>/event
+  Nominal:N / Reverse:N / Error / conexion
+
+Despues de copiar:
+  pio run
+  pio run -t upload
+  pio run -t uploadfs

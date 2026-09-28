@@ -157,6 +157,40 @@ struct AxleCounterConfig {
 };
 
 
+
+enum class TurnoutDrive : uint8_t {
+    PULSE = 0,
+    MAINTAINED = 1
+};
+
+struct TurnoutConfig {
+    bool enabled = false;
+    String station;
+    String id;
+
+    uint8_t outputNormal = 1;
+    uint8_t outputReverse = 2;
+
+    // 0 = sin comprobacion. Si se usa comprobacion deben configurarse ambas.
+    uint8_t inputNormal = 0;
+    uint8_t inputReverse = 0;
+
+    TurnoutDrive drive = TurnoutDrive::PULSE;
+    uint16_t pulseMs = 500;
+
+    String commandTopic() const {
+        return "aguja/" + station + "/" + id + "/mando";
+    }
+
+    String feedbackTopic() const {
+        return "aguja/" + station + "/" + id + "/comprobacion";
+    }
+
+    bool hasFeedback() const {
+        return inputNormal > 0 && inputReverse > 0;
+    }
+};
+
 // ============================================================
 // SEÑALES
 // ============================================================
@@ -230,6 +264,7 @@ public:
     // CV tradicionales y cuenta-ejes son objetos distintos.
     std::vector<CvConfig> cvs;
     std::vector<AxleCounterConfig> axleCounters;
+    std::vector<TurnoutConfig> turnouts;
 
 
     std::vector<InputConfig> inputs =
