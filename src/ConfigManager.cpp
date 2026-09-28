@@ -1,102 +1,293 @@
 #include "ConfigManager.h"
 #include "JsonPayload.h"
 
+#include <utility>
+
 ConfigManager Config;
+
+namespace {
+
+bool textField(JsonVariantConst value, size_t maxLength, bool multiline = false) {
+    if (!value.is<const char*>()) return false;
+    JsonString text = value.as<JsonString>();
+    if (text.size() > maxLength) return false;
+
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char c = text.c_str()[i];
+        if (static_cast<unsigned char>(c) < 32 &&
+            !(multiline && (c == '\n' || c == '\r' || c == '\t'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool topicField(const String& topic) {
+    return topic.indexOf('#') < 0 && topic.indexOf('+') < 0;
+}
+
+bool mqttIdField(const String& value) {
+    if (value.isEmpty() || value.length() > 64) return false;
+
+    for (size_t i = 0; i < value.length(); ++i) {
+        const char c = value[i];
+        if (static_cast<unsigned char>(c) < 33 ||
+            c == '/' || c == '+' || c == '#') {
+            return false;
+        }
+    }
+    return true;
+}
+
+String cvTopic(const CvConfig& cv) {
+    return "cv/" + cv.station + "/" + cv.id + "/field_state";
+}
+
+String axleTopic(const AxleCounterConfig& counter) {
+    return "cejes/" + counter.station + "/" + counter.id + "/event";
+}
+
+} // namespace
+
 
 void ConfigManager::begin() {
     prefs.begin("interlock", false);
+
+    // Carga las antiguas claves individuales como valores base.
     load();
+
     String stored = prefs.getString("config_v1", "");
-    if (!stored.isEmpty()) {
-        DynamicJsonDocument doc(65536);
-        String error;
-        if (deserializeJson(doc, stored)) {
-            Serial.println("ERROR: JSON NVS no valido."); return;
+    if (stored.isEmpty()) return;
+
+    DynamicJsonDocument doc(65536);
+    String error;
+
+    if (deserializeJson(doc, stored)) {
+        Serial.println("ERROR: JSON NVS no valido.");
+        return;
+    }
+
+    // La antigua deteccion trackSections no es compatible con el nuevo
+    // modelo CV / cuenta-ejes. Conservamos el resto de la configuracion
+    // y arrancamos la deteccion nueva vacia.
+    const bool legacyDetection =
+        doc.containsKey("trackSections") &&
+        !doc.containsKey("cvs") &&
+        !doc.containsKey("axleCounters");
+
+    if (legacyDetection) {
+        doc.remove("trackSections");
+        doc.createNestedArray("cvs");
+        doc.createNestedArray("axleCounters");
+        Serial.println(
+            "AVISO: configuracion antigua de deteccion descartada. "
+            "Reconfigurar CV y cuenta-ejes desde la web."
+        );
+    }
+
+    // Mantener la configuracion por indice logico si cambia el numero
+    // de entradas o salidas configuradas por el hardware.
+    if (doc["inputs"].is<JsonArray>() &&
+        doc["outputs"].is<JsonArray>() &&
+        (doc["inputs"].size() != inputs.size() ||
+         doc["outputs"].size() != outputs.size())) {
+
+        DynamicJsonDocument resized(65536);
+        toJson(resized, true);
+
+        resized["mqtt"].set(doc["mqtt"]);
+
+        if (doc.containsKey("signals"))
+            resized["signals"].set(doc["signals"]);
+
+        if (doc.containsKey("cvs"))
+            resized["cvs"].set(doc["cvs"]);
+
+        if (doc.containsKey("axleCounters"))
+            resized["axleCounters"].set(doc["axleCounters"]);
+
+        for (const char* key : {"inputs", "outputs"}) {
+            const size_t count =
+                key[0] == 'i' ? inputs.size() : outputs.size();
+
+            for (size_t i = 0;
+                 i < count && i < doc[key].size();
+                 ++i) {
+                resized[key][i].set(doc[key][i]);
+            }
         }
-        // Keep channel settings by logical index when hardware is expanded/reduced.
-        if (doc["inputs"].is<JsonArray>() && doc["outputs"].is<JsonArray>() &&
-            (doc["inputs"].size()!=inputs.size() || doc["outputs"].size()!=outputs.size())) {
-            DynamicJsonDocument resized(65536);
-            toJson(resized,true);
-            resized["mqtt"].set(doc["mqtt"]);
-            if (doc.containsKey("signals")) resized["signals"].set(doc["signals"]);
-            if (doc.containsKey("trackSections")) resized["trackSections"].set(doc["trackSections"]);
-            for (const char* key : {"inputs","outputs"}) {
-                const size_t count = key[0]=='i' ? inputs.size() : outputs.size();
-                for (size_t i=0;i<count && i<doc[key].size();++i) resized[key][i].set(doc[key][i]);
+
+        JsonArray signalList = resized["signals"].as<JsonArray>();
+        for (size_t i = signalList.size(); i > 0; --i) {
+            bool removed = false;
+            for (JsonObject light :
+                 signalList[i - 1]["lights"].as<JsonArray>()) {
+                if (light["relay"].as<unsigned int>() > outputs.size())
+                    removed = true;
             }
-            JsonArray list=resized["signals"].as<JsonArray>();
-            for (size_t i=list.size();i>0;--i) {
-                bool removed=false;
-                for (JsonObject light:list[i-1]["lights"].as<JsonArray>())
-                    if(light["relay"].as<unsigned int>()>outputs.size())removed=true;
-                if(removed)list.remove(i-1);
+            if (removed) signalList.remove(i - 1);
+        }
+
+        JsonArray cvList = resized["cvs"].as<JsonArray>();
+        for (size_t i = cvList.size(); i > 0; --i) {
+            if (cvList[i - 1]["input"].as<unsigned int>() > inputs.size())
+                cvList.remove(i - 1);
+        }
+
+        JsonArray axleList = resized["axleCounters"].as<JsonArray>();
+        for (size_t i = axleList.size(); i > 0; --i) {
+            JsonObject counter = axleList[i - 1];
+            if (counter["inputA"].as<unsigned int>() > inputs.size() ||
+                counter["inputB"].as<unsigned int>() > inputs.size()) {
+                axleList.remove(i - 1);
             }
-            JsonArray tracks=resized["trackSections"].as<JsonArray>();
-            for (size_t i=tracks.size();i>0;--i) {
-                JsonObject section=tracks[i-1];
-                const bool axle=String(section["type"] | "linear") == "axleCounter";
-                if (section["inputA"].as<unsigned int>() > inputs.size() ||
-                    (axle && section["inputB"].as<unsigned int>() > inputs.size())) tracks.remove(i-1);
-            }
-            if (resized.overflowed() || !applyJson(resized.as<JsonVariantConst>(), error, false)) {
-                Serial.println("ERROR: no se pudo adaptar la configuracion NVS."); return;
-            }
-            Serial.println("NVS adaptada al numero de canales; revisar canales y senales antes de operar.");
+        }
+
+        if (resized.overflowed() ||
+            !applyJson(resized.as<JsonVariantConst>(), error, false)) {
+            Serial.print("ERROR: no se pudo adaptar la configuracion NVS: ");
+            Serial.println(error);
             return;
         }
-        if (doc.overflowed() || !applyJson(doc.as<JsonVariantConst>(), error, false))
-            Serial.println("ERROR: configuracion NVS no valida; se conserva la configuracion anterior.");
+
+        Serial.println(
+            "NVS adaptada al numero de canales; revisar configuracion "
+            "antes de operar."
+        );
+        return;
+    }
+
+    // Para snapshots creados antes de introducir estas colecciones.
+    if (!doc.containsKey("cvs"))
+        doc.createNestedArray("cvs");
+
+    if (!doc.containsKey("axleCounters"))
+        doc.createNestedArray("axleCounters");
+
+    if (doc.overflowed() ||
+        !applyJson(doc.as<JsonVariantConst>(), error, false)) {
+        Serial.print(
+            "ERROR: configuracion NVS no valida; "
+            "se conserva la configuracion anterior: "
+        );
+        Serial.println(error);
     }
 }
+
 
 void ConfigManager::load() {
-    mqtt.host = prefs.getString("mqtt_host", "");
-    mqtt.port = prefs.getUShort("mqtt_port", 1883);
-    mqtt.clientId = prefs.getString("mqtt_client", "InterlockEasy-IO");
-    mqtt.username = prefs.getString("mqtt_user", "");
-    mqtt.password = prefs.getString("mqtt_pass", "");
-    mqtt.keepAlive = prefs.getUShort("mqtt_keep", 30);
+    mqtt.host =
+        prefs.getString("mqtt_host", "");
 
-    for (int i = 0; i < inputs.size(); i++) {
+    mqtt.port =
+        prefs.getUShort("mqtt_port", 1883);
+
+    mqtt.clientId =
+        prefs.getString("mqtt_client", "InterlockEasy-IO");
+
+    mqtt.username =
+        prefs.getString("mqtt_user", "");
+
+    mqtt.password =
+        prefs.getString("mqtt_pass", "");
+
+    mqtt.keepAlive =
+        prefs.getUShort("mqtt_keep", 30);
+
+
+    for (size_t i = 0; i < inputs.size(); ++i) {
         String p = "i" + String(i);
-        inputs[i].enabled = prefs.getBool((p + "e").c_str(), false);
-        inputs[i].name = prefs.getString((p + "n").c_str(), "");
-        inputs[i].topic = prefs.getString((p + "t").c_str(), "");
-        inputs[i].payloadOn = prefs.getString((p + "on").c_str(), "1");
-        inputs[i].payloadOff = prefs.getString((p + "off").c_str(), "0");
-        inputs[i].inverted = prefs.getBool((p + "inv").c_str(), true);
-        inputs[i].retain = prefs.getBool((p + "ret").c_str(), true);
+
+        inputs[i].enabled =
+            prefs.getBool((p + "e").c_str(), false);
+
+        inputs[i].name =
+            prefs.getString((p + "n").c_str(), "");
+
+        inputs[i].topic =
+            prefs.getString((p + "t").c_str(), "");
+
+        inputs[i].payloadOn =
+            prefs.getString((p + "on").c_str(), "1");
+
+        inputs[i].payloadOff =
+            prefs.getString((p + "off").c_str(), "0");
+
+        inputs[i].inverted =
+            prefs.getBool((p + "inv").c_str(), true);
+
+        inputs[i].retain =
+            prefs.getBool((p + "ret").c_str(), true);
     }
 
-    for (int i = 0; i < outputs.size(); i++) {
+
+    for (size_t i = 0; i < outputs.size(); ++i) {
         String p = "o" + String(i);
-        outputs[i].enabled = prefs.getBool((p + "e").c_str(), false);
-        outputs[i].name = prefs.getString((p + "n").c_str(), "");
-        outputs[i].commandTopic = prefs.getString((p + "ct").c_str(), "");
-        outputs[i].payloadOn = prefs.getString((p + "on").c_str(), "1");
-        outputs[i].payloadOff = prefs.getString((p + "off").c_str(), "0");
-        outputs[i].publishState = prefs.getBool((p + "ps").c_str(), true);
-        outputs[i].stateTopic = prefs.getString((p + "st").c_str(), "");
-        outputs[i].stateOn = prefs.getString((p + "son").c_str(), "1");
-        outputs[i].stateOff = prefs.getString((p + "sof").c_str(), "0");
-        outputs[i].retain = prefs.getBool((p + "ret").c_str(), true);
+
+        outputs[i].enabled =
+            prefs.getBool((p + "e").c_str(), false);
+
+        outputs[i].name =
+            prefs.getString((p + "n").c_str(), "");
+
+        outputs[i].commandTopic =
+            prefs.getString((p + "ct").c_str(), "");
+
+        outputs[i].payloadOn =
+            prefs.getString((p + "on").c_str(), "1");
+
+        outputs[i].payloadOff =
+            prefs.getString((p + "off").c_str(), "0");
+
+        outputs[i].publishState =
+            prefs.getBool((p + "ps").c_str(), true);
+
+        outputs[i].stateTopic =
+            prefs.getString((p + "st").c_str(), "");
+
+        outputs[i].stateOn =
+            prefs.getString((p + "son").c_str(), "1");
+
+        outputs[i].stateOff =
+            prefs.getString((p + "sof").c_str(), "0");
+
+        outputs[i].retain =
+            prefs.getBool((p + "ret").c_str(), true);
     }
 }
 
-void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
+
+void ConfigManager::toJson(
+    JsonDocument& doc,
+    bool secrets
+) const {
     doc.clear();
-    JsonObject m = doc.createNestedObject("mqtt");
+
+    JsonObject m =
+        doc.createNestedObject("mqtt");
+
     m["host"] = mqtt.host;
     m["port"] = mqtt.port;
     m["clientId"] = mqtt.clientId;
     m["username"] = mqtt.username;
-    if (secrets) m["password"] = mqtt.password;
-    m["passwordSet"] = !mqtt.password.isEmpty();
-    m["keepAlive"] = mqtt.keepAlive;
-    JsonArray inputsArray = doc.createNestedArray("inputs");
-    for (int i = 0; i < inputs.size(); ++i) {
-        JsonObject item = inputsArray.createNestedObject();
+
+    if (secrets)
+        m["password"] = mqtt.password;
+
+    m["passwordSet"] =
+        !mqtt.password.isEmpty();
+
+    m["keepAlive"] =
+        mqtt.keepAlive;
+
+
+    JsonArray inputsArray =
+        doc.createNestedArray("inputs");
+
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        JsonObject item =
+            inputsArray.createNestedObject();
+
         item["enabled"] = inputs[i].enabled;
         item["name"] = inputs[i].name;
         item["topic"] = inputs[i].topic;
@@ -107,9 +298,15 @@ void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
         item["debounceMs"] = inputs[i].debounceMs;
         item["retain"] = inputs[i].retain;
     }
-    JsonArray outputsArray = doc.createNestedArray("outputs");
-    for (int i = 0; i < outputs.size(); ++i) {
-        JsonObject item = outputsArray.createNestedObject();
+
+
+    JsonArray outputsArray =
+        doc.createNestedArray("outputs");
+
+    for (size_t i = 0; i < outputs.size(); ++i) {
+        JsonObject item =
+            outputsArray.createNestedObject();
+
         item["enabled"] = outputs[i].enabled;
         item["name"] = outputs[i].name;
         item["commandTopic"] = outputs[i].commandTopic;
@@ -124,353 +321,1144 @@ void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
         item["stateOff"] = outputs[i].stateOff;
         item["retain"] = outputs[i].retain;
     }
-    JsonArray signalArray = doc.createNestedArray("signals");
+
+
+    JsonArray signalArray =
+        doc.createNestedArray("signals");
+
     for (const auto& signal : signals) {
-        JsonObject item = signalArray.createNestedObject();
+        JsonObject item =
+            signalArray.createNestedObject();
+
         item["enabled"] = signal.enabled;
         item["name"] = signal.name;
         item["topic"] = signal.topic;
         item["jsonPath"] = signal.jsonPath;
         item["blinkMs"] = signal.blinkMs;
-        JsonArray lights = item.createNestedArray("lights");
+
+        JsonArray lights =
+            item.createNestedArray("lights");
+
         for (const auto& light : signal.lights) {
-            JsonObject entry = lights.createNestedObject();
-            entry["name"] = light.name; entry["relay"] = light.relay;
+            JsonObject entry =
+                lights.createNestedObject();
+
+            entry["name"] = light.name;
+            entry["relay"] = light.relay;
         }
-        JsonArray aspects = item.createNestedArray("aspects");
+
+        JsonArray aspects =
+            item.createNestedArray("aspects");
+
         for (const auto& aspect : signal.aspects) {
-            JsonObject entry = aspects.createNestedObject();
+            JsonObject entry =
+                aspects.createNestedObject();
+
             entry["value"] = aspect.value;
-            JsonArray blink = entry.createNestedArray("blink");
-            for (size_t i = 0; i < signal.lights.size(); ++i)
-                if (aspect.blink & (1U << i)) blink.add(i + 1);
-            JsonArray on = entry.createNestedArray("on");
-            for (size_t i = 0; i < signal.lights.size(); ++i)
-                if (aspect.mask & (1U << i)) on.add(i + 1);
+
+            JsonArray blink =
+                entry.createNestedArray("blink");
+
+            for (size_t i = 0;
+                 i < signal.lights.size();
+                 ++i) {
+                if (aspect.blink & (1U << i))
+                    blink.add(i + 1);
+            }
+
+            JsonArray on =
+                entry.createNestedArray("on");
+
+            for (size_t i = 0;
+                 i < signal.lights.size();
+                 ++i) {
+                if (aspect.mask & (1U << i))
+                    on.add(i + 1);
+            }
         }
     }
 
-    JsonArray trackArray = doc.createNestedArray("trackSections");
-    for (const auto& section : trackSections) {
-        JsonObject item = trackArray.createNestedObject();
-        item["enabled"] = section.enabled;
-        item["type"] = section.type == TrackSectionType::AXLE_COUNTER ? "axleCounter" : "linear";
-        item["name"] = section.name;
-        item["inputA"] = section.inputA;
-        item["inputB"] = section.inputB;
-        item["stateTopic"] = section.stateTopic;
-        item["countTopic"] = section.countTopic;
-        item["payloadOccupied"] = section.payloadOccupied;
-        item["payloadFree"] = section.payloadFree;
-        item["retain"] = section.retain;
+
+    // ========================================================
+    // CV TRADICIONALES
+    // ========================================================
+
+    JsonArray cvArray =
+        doc.createNestedArray("cvs");
+
+    for (const auto& cv : cvs) {
+        JsonObject item =
+            cvArray.createNestedObject();
+
+        item["enabled"] = cv.enabled;
+        item["station"] = cv.station;
+        item["id"] = cv.id;
+        item["input"] = cv.input;
+
+        // Informativo para la interfaz.
+        item["topic"] = cvTopic(cv);
     }
 
+
+    // ========================================================
+    // CONTADORES DE EJES
+    // ========================================================
+
+    JsonArray axleArray =
+        doc.createNestedArray("axleCounters");
+
+    for (const auto& counter : axleCounters) {
+        JsonObject item =
+            axleArray.createNestedObject();
+
+        item["enabled"] = counter.enabled;
+        item["station"] = counter.station;
+        item["id"] = counter.id;
+        item["inputA"] = counter.inputA;
+        item["inputB"] = counter.inputB;
+
+        // Informativo para la interfaz.
+        item["topic"] = axleTopic(counter);
+    }
 }
+
 
 bool ConfigManager::save() {
     DynamicJsonDocument doc(65536);
+
     toJson(doc, true);
-    if (doc.overflowed()) return false;
+
+    if (doc.overflowed())
+        return false;
+
     String value;
     serializeJson(doc, value);
-    return prefs.putString("config_v1", value) == value.length();
+
+    return
+        prefs.putString("config_v1", value) ==
+        value.length();
 }
 
-namespace {
-bool textField(JsonVariantConst value, size_t maxLength, bool multiline = false) {
-    if (!value.is<const char*>()) return false;
-    JsonString text = value.as<JsonString>();
-    if (text.size() > maxLength) return false;
-    for (size_t i = 0; i < text.size(); ++i)
-        if (static_cast<unsigned char>(text.c_str()[i]) < 32 &&
-            !(multiline && (text.c_str()[i] == '\n' || text.c_str()[i] == '\r' || text.c_str()[i] == '\t'))) return false;
-    return true;
-}
-bool topicField(const String& topic) {
-    return topic.indexOf('#') < 0 && topic.indexOf('+') < 0;
-}
-}
 
-bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist) {
-    error = "Configuracion incompleta o valores no validos.";
-    if (!doc.is<JsonObjectConst>() || !doc["mqtt"].is<JsonObjectConst>() ||
-        !doc["inputs"].is<JsonArrayConst>() || doc["inputs"].size() != inputs.size() ||
-        !doc["outputs"].is<JsonArrayConst>() || doc["outputs"].size() != outputs.size()) return false;
+bool ConfigManager::applyJson(
+    JsonVariantConst doc,
+    String& error,
+    bool persist
+) {
+    error =
+        "Configuracion incompleta o valores no validos.";
+
+    if (!doc.is<JsonObjectConst>() ||
+        !doc["mqtt"].is<JsonObjectConst>() ||
+        !doc["inputs"].is<JsonArrayConst>() ||
+        doc["inputs"].size() != inputs.size() ||
+        !doc["outputs"].is<JsonArrayConst>() ||
+        doc["outputs"].size() != outputs.size()) {
+        return false;
+    }
+
+
     MQTTConfig nextMqtt;
     std::vector<InputConfig> nextInputs(inputs.size());
     std::vector<OutputConfig> nextOutputs(outputs.size());
-    error = "Broker MQTT: comprueba tipos, longitudes, puerto, Client ID y keep alive.";
-    auto m = doc["mqtt"];
-    if (!textField(m["host"], 128) || !textField(m["clientId"], 64) ||
-        !textField(m["username"], 128) || !m["port"].is<unsigned int>() ||
-        m["port"].as<unsigned int>() < 1 || m["port"].as<unsigned int>() > 65535 ||
-        !m["keepAlive"].is<unsigned int>() || m["keepAlive"].as<unsigned int>() < 5 ||
-        m["keepAlive"].as<unsigned int>() > 3600) return false;
-    if (m.containsKey("password") && !textField(m["password"], 128)) return false;
-    nextMqtt.password = m.containsKey("password") ? m["password"].as<String>() : mqtt.password;
-    nextMqtt.host = m["host"].as<String>();
-    nextMqtt.port = m["port"].as<uint16_t>();
-    nextMqtt.clientId = m["clientId"].as<String>();
-    nextMqtt.username = m["username"].as<String>();
-    nextMqtt.keepAlive = m["keepAlive"].as<uint16_t>();
-    if (nextMqtt.clientId.isEmpty() || nextMqtt.host.indexOf(' ') >= 0 ||
-        nextMqtt.host.indexOf('/') >= 0) return false;
-    for (int i = 0; i < inputs.size(); ++i) {
-        error = "DI" + String(i + 1) + ": campos no validos, topic vacio o payloads iguales.";
-        auto item = doc["inputs"][i];
-        if (!item.is<JsonObjectConst>()) return false;
-        if (!item["enabled"].is<bool>()) return false;
-        nextInputs[i].enabled = item["enabled"].as<bool>();
-        if (!textField(item["name"], 64)) return false;
-        nextInputs[i].name = item["name"].as<String>();
-        if (!textField(item["topic"], 128)) return false;
-        nextInputs[i].topic = item["topic"].as<String>();
-        if (!textField(item["payloadOn"], 256, true)) return false;
-        nextInputs[i].payloadOn = item["payloadOn"].as<String>();
-        if (!textField(item["payloadOff"], 256, true)) return false;
-        nextInputs[i].payloadOff = item["payloadOff"].as<String>();
-        if (!item["inverted"].is<bool>()) return false;
-        nextInputs[i].inverted = item["inverted"].as<bool>();
+
+
+    // ========================================================
+    // MQTT
+    // ========================================================
+
+    error =
+        "Broker MQTT: comprueba tipos, longitudes, "
+        "puerto, Client ID y keep alive.";
+
+    JsonVariantConst m = doc["mqtt"];
+
+    if (!textField(m["host"], 128) ||
+        !textField(m["clientId"], 64) ||
+        !textField(m["username"], 128) ||
+        !m["port"].is<unsigned int>() ||
+        m["port"].as<unsigned int>() < 1 ||
+        m["port"].as<unsigned int>() > 65535 ||
+        !m["keepAlive"].is<unsigned int>() ||
+        m["keepAlive"].as<unsigned int>() < 5 ||
+        m["keepAlive"].as<unsigned int>() > 3600) {
+        return false;
+    }
+
+    if (m.containsKey("password") &&
+        !textField(m["password"], 128)) {
+        return false;
+    }
+
+    nextMqtt.password =
+        m.containsKey("password")
+            ? m["password"].as<String>()
+            : mqtt.password;
+
+    nextMqtt.host =
+        m["host"].as<String>();
+
+    nextMqtt.port =
+        m["port"].as<uint16_t>();
+
+    nextMqtt.clientId =
+        m["clientId"].as<String>();
+
+    nextMqtt.username =
+        m["username"].as<String>();
+
+    nextMqtt.keepAlive =
+        m["keepAlive"].as<uint16_t>();
+
+    if (nextMqtt.clientId.isEmpty() ||
+        nextMqtt.host.indexOf(' ') >= 0 ||
+        nextMqtt.host.indexOf('/') >= 0) {
+        return false;
+    }
+
+
+    // ========================================================
+    // ENTRADAS GENERICAS
+    // ========================================================
+
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        error =
+            "DI" + String(i + 1) +
+            ": campos no validos, topic vacio o payloads iguales.";
+
+        JsonVariantConst item =
+            doc["inputs"][i];
+
+        if (!item.is<JsonObjectConst>() ||
+            !item["enabled"].is<bool>()) {
+            return false;
+        }
+
+        InputConfig& c =
+            nextInputs[i];
+
+        c.enabled =
+            item["enabled"].as<bool>();
+
+        if (!textField(item["name"], 64))
+            return false;
+
+        c.name =
+            item["name"].as<String>();
+
+        if (!textField(item["topic"], 128))
+            return false;
+
+        c.topic =
+            item["topic"].as<String>();
+
+        if (!textField(item["payloadOn"], 256, true) ||
+            !textField(item["payloadOff"], 256, true)) {
+            return false;
+        }
+
+        c.payloadOn =
+            item["payloadOn"].as<String>();
+
+        c.payloadOff =
+            item["payloadOff"].as<String>();
+
+        if (!item["inverted"].is<bool>())
+            return false;
+
+        c.inverted =
+            item["inverted"].as<bool>();
+
         if (item.containsKey("debounceMs")) {
-            if (!item["debounceMs"].is<unsigned int>() || item["debounceMs"].as<unsigned int>() > 5000) {
-                error = "Antirrebote: debe estar entre 0 y 5000 ms."; return false;
+            if (!item["debounceMs"].is<unsigned int>() ||
+                item["debounceMs"].as<unsigned int>() > 5000) {
+                error =
+                    "Antirrebote: debe estar entre 0 y 5000 ms.";
+                return false;
             }
-            nextInputs[i].debounceMs = item["debounceMs"].as<uint16_t>();
-        }
-        if (!item["retain"].is<bool>()) return false;
-        nextInputs[i].retain = item["retain"].as<bool>();
-        auto& c = nextInputs[i];
-        if (item.containsKey("payloadJson") && !item["payloadJson"].is<bool>()) return false;
-        c.payloadJson = item["payloadJson"] | false;
-        if (c.payloadJson && !JsonPayload::validPair(c.payloadOn.c_str(), c.payloadOff.c_str())) {
-            error = "Payloads JSON ON/OFF no validos, demasiado complejos o equivalentes."; return false;
+
+            c.debounceMs =
+                item["debounceMs"].as<uint16_t>();
         }
 
-        if (c.payloadOn == c.payloadOff) return false;
-        if (!topicField(c.topic) || (c.enabled && c.topic.isEmpty())) return false;
-    }
-    for (int i = 0; i < outputs.size(); ++i) {
-        error = "RO" + String(i + 1) + ": campos no validos, topics vacios o payloads iguales.";
-        auto item = doc["outputs"][i];
-        if (!item.is<JsonObjectConst>()) return false;
-        if (!item["enabled"].is<bool>()) return false;
-        nextOutputs[i].enabled = item["enabled"].as<bool>();
-        if (!textField(item["name"], 64)) return false;
-        nextOutputs[i].name = item["name"].as<String>();
-        if (!textField(item["commandTopic"], 128)) return false;
-        nextOutputs[i].commandTopic = item["commandTopic"].as<String>();
-        if (!textField(item["payloadOn"], 256, true)) return false;
-        nextOutputs[i].payloadOn = item["payloadOn"].as<String>();
-        if (!textField(item["payloadOff"], 256, true)) return false;
-        nextOutputs[i].payloadOff = item["payloadOff"].as<String>();
-        if (!item["publishState"].is<bool>()) return false;
-        nextOutputs[i].publishState = item["publishState"].as<bool>();
-        if (!textField(item["stateTopic"], 128)) return false;
-        nextOutputs[i].stateTopic = item["stateTopic"].as<String>();
-        if (!textField(item["stateOn"], 256, true)) return false;
-        nextOutputs[i].stateOn = item["stateOn"].as<String>();
-        if (!textField(item["stateOff"], 256, true)) return false;
-        nextOutputs[i].stateOff = item["stateOff"].as<String>();
-        if (!item["retain"].is<bool>()) return false;
-        nextOutputs[i].retain = item["retain"].as<bool>();
-        auto& c = nextOutputs[i];
-        if (item.containsKey("payloadJson") && !item["payloadJson"].is<bool>()) return false;
-        c.payloadJson = item["payloadJson"] | false;
-        if (c.payloadJson && !JsonPayload::validPair(c.payloadOn.c_str(), c.payloadOff.c_str())) {
-            error = "Payloads JSON ON/OFF no validos, demasiado complejos o equivalentes."; return false;
-        }
-        if (item.containsKey("stateJson") && !item["stateJson"].is<bool>()) return false;
-        c.stateJson = item["stateJson"] | false;
-        if (item.containsKey("jsonPath") && !textField(item["jsonPath"], 64)) return false;
-        c.jsonPath = item["jsonPath"] | "";
-        if (!c.jsonPath.isEmpty()) {
-            const char* path = c.jsonPath.c_str();
-            bool segment = false;
-            for (size_t j = 0; j < c.jsonPath.length(); ++j) {
-                if (path[j] == '.') { if (!segment) return false; segment = false; }
-                else segment = true;
-            }
-            if (!segment) return false;
-        }
-        if (c.stateJson && !JsonPayload::validPair(c.stateOn.c_str(), c.stateOff.c_str())) {
-            error = "Payloads JSON de estado no validos, demasiado complejos o equivalentes."; return false;
+        if (!item["retain"].is<bool>())
+            return false;
+
+        c.retain =
+            item["retain"].as<bool>();
+
+        if (item.containsKey("payloadJson") &&
+            !item["payloadJson"].is<bool>()) {
+            return false;
         }
 
-        if (c.payloadOn == c.payloadOff) return false;
-        if (!topicField(c.commandTopic) || !topicField(c.stateTopic) ||
-            (c.enabled && (c.commandTopic.isEmpty() || (c.publishState && c.stateTopic.isEmpty()))) ||
-            (c.publishState && c.stateOn == c.stateOff)) return false;
-    }
-    // Prevent this module's own publications from being interpreted as commands.
-    for (const auto& output : nextOutputs) {
-        if (!output.enabled) continue;
-        for (const auto& input : nextInputs)
-            if (input.enabled && input.topic == output.commandTopic) {
-                error = "Un topic de entrada coincide con un topic de mando.";
-                return false;
-            }
-        for (const auto& state : nextOutputs)
-            if (state.enabled && state.publishState && state.stateTopic == output.commandTopic) {
-                error = "Un topic de estado coincide con un topic de mando.";
-                return false;
-            }
-    }
-    std::vector<SignalConfig> nextSignals;
-    error = "Senales: configuracion no valida (maximo 8 senales, 8 focos y 12 aspectos por senal).";
-    if (!doc.containsKey("signals") && !signals.empty()) return false;
-    if (doc.containsKey("signals")) {
-        if (!doc["signals"].is<JsonArrayConst>() || doc["signals"].size() > 8) return false;
-        uint32_t reserved = 0;
-        for (JsonObjectConst item : doc["signals"].as<JsonArrayConst>()) {
-            if (!item["enabled"].is<bool>() || !textField(item["name"], 64) ||
-                !textField(item["topic"], 128) || !textField(item["jsonPath"], 64) ||
-                !item["lights"].is<JsonArrayConst>() || item["lights"].size() < 1 || item["lights"].size() > 8 ||
-                !item["aspects"].is<JsonArrayConst>() || item["aspects"].size() < 1 || item["aspects"].size() > 12) return false;
-            SignalConfig signal;
-            signal.enabled = item["enabled"].as<bool>(); signal.name = item["name"].as<String>();
-            signal.topic = item["topic"].as<String>(); signal.jsonPath = item["jsonPath"].as<String>();
-            if (!topicField(signal.topic) || signal.name.isEmpty() || (signal.enabled && signal.topic.isEmpty())) return false;
-            if (!signal.jsonPath.isEmpty()) {
-                const char* path = signal.jsonPath.c_str();
-                for (size_t j = 0; j < signal.jsonPath.length(); ++j)
-                    if (path[j] == '.' && (j == 0 || path[j+1] == '.' || path[j+1] == 0)) return false;
-            }
-            if (item.containsKey("blinkMs")) {
-                if (!item["blinkMs"].is<unsigned int>() || item["blinkMs"].as<unsigned int>() < 250 || item["blinkMs"].as<unsigned int>() > 10000) return false;
-                signal.blinkMs = item["blinkMs"].as<uint16_t>();
-            }
-            uint32_t mask = 0;
-            for (JsonObjectConst light : item["lights"].as<JsonArrayConst>()) {
-                if (!textField(light["name"], 32) || !light["relay"].is<unsigned int>() ||
-                    light["relay"].as<unsigned int>() < 1 || light["relay"].as<unsigned int>() > outputs.size()) return false;
-                SignalLight entry; entry.name = light["name"].as<String>(); entry.relay = light["relay"].as<uint8_t>();
-                uint32_t bit = uint32_t(1) << (entry.relay - 1);
-                if (mask & bit) { error = "Una senal no puede repetir un rele entre focos."; return false; }
-                mask |= bit; signal.lights.push_back(entry);
-            }
-            for (JsonObjectConst aspect : item["aspects"].as<JsonArrayConst>()) {
-                if (!textField(aspect["value"], 64) || !aspect["on"].is<JsonArrayConst>()) return false;
-                SignalAspect entry; entry.value = aspect["value"].as<String>();
-                if (entry.value.isEmpty()) return false;
-                for (const auto& previous : signal.aspects) if (previous.value == entry.value) return false;
-                for (JsonVariantConst light : aspect["on"].as<JsonArrayConst>()) {
-                    if (!light.is<unsigned int>() || light.as<unsigned int>() < 1 || light.as<unsigned int>() > signal.lights.size()) return false;
-                    const uint8_t bit = uint8_t(1U << (light.as<unsigned int>() - 1));
-                    if (entry.mask & bit) return false;
-                    entry.mask |= bit;
-                }
-                if (aspect.containsKey("blink")) {
-                    if (!aspect["blink"].is<JsonArrayConst>()) return false;
-                    for (JsonVariantConst light : aspect["blink"].as<JsonArrayConst>()) {
-                        if (!light.is<unsigned int>() || light.as<unsigned int>() < 1 || light.as<unsigned int>() > signal.lights.size()) return false;
-                        const uint8_t bit = uint8_t(1U << (light.as<unsigned int>() - 1));
-                        if ((entry.mask | entry.blink) & bit) return false;
-                        entry.blink |= bit;
-                    }
-                }
-                signal.aspects.push_back(entry);
-            }
-            if (signal.enabled) {
-                if (mask & reserved) { error = "Dos senales habilitadas comparten reles."; return false; }
-                reserved |= mask;
-                for (int i = 0; i < outputs.size(); ++i) if ((mask & (1U << i)) && nextOutputs[i].enabled) {
-                    error = "Deshabilita el mando individual de los reles asignados a una senal."; return false;
-                }
-                for (const auto& input : nextInputs) if (input.enabled && input.topic == signal.topic) {
-                    error = "El topic de senal coincide con una publicacion de entrada."; return false;
-                }
-                for (const auto& output : nextOutputs) if (output.enabled && output.publishState && output.stateTopic == signal.topic) {
-                    error = "El topic de senal coincide con una publicacion de salida."; return false;
-                }
-            }
-            nextSignals.push_back(signal);
+        c.payloadJson =
+            item["payloadJson"] | false;
+
+        if (c.payloadJson &&
+            !JsonPayload::validPair(
+                c.payloadOn.c_str(),
+                c.payloadOff.c_str()
+            )) {
+            error =
+                "Payloads JSON ON/OFF no validos, "
+                "demasiado complejos o equivalentes.";
+            return false;
         }
-    }
-    std::vector<TrackSectionConfig> nextTracks;
-    error = "Deteccion: configuracion no valida (maximo 16 tramos y entradas exclusivas).";
-    if (!doc.containsKey("trackSections") && !trackSections.empty()) return false;
-    if (doc.containsKey("trackSections")) {
-        if (!doc["trackSections"].is<JsonArrayConst>() || doc["trackSections"].size() > 16) return false;
-        uint32_t reservedInputs = 0;
-        for (JsonObjectConst item : doc["trackSections"].as<JsonArrayConst>()) {
-            if (!item["enabled"].is<bool>() || !textField(item["type"], 16) ||
-                !textField(item["name"], 64) || !item["inputA"].is<unsigned int>() ||
-                !textField(item["stateTopic"], 128) || !textField(item["countTopic"], 128) ||
-                !textField(item["payloadOccupied"], 256, true) || !textField(item["payloadFree"], 256, true) ||
-                !item["retain"].is<bool>()) return false;
-            TrackSectionConfig section;
-            section.enabled = item["enabled"].as<bool>();
-            const String type = item["type"].as<String>();
-            if (type == "linear") section.type = TrackSectionType::LINEAR;
-            else if (type == "axleCounter") section.type = TrackSectionType::AXLE_COUNTER;
-            else return false;
-            section.name = item["name"].as<String>();
-            section.inputA = item["inputA"].as<uint8_t>();
-            section.inputB = item["inputB"] | 0;
-            section.stateTopic = item["stateTopic"].as<String>();
-            section.countTopic = item["countTopic"].as<String>();
-            section.payloadOccupied = item["payloadOccupied"].as<String>();
-            section.payloadFree = item["payloadFree"].as<String>();
-            section.retain = item["retain"].as<bool>();
-            if (section.name.isEmpty() || section.inputA < 1 || section.inputA > inputs.size() ||
-                !topicField(section.stateTopic) || !topicField(section.countTopic) ||
-                section.payloadOccupied == section.payloadFree || section.payloadOccupied.isEmpty() || section.payloadFree.isEmpty()) return false;
-            if (section.type == TrackSectionType::AXLE_COUNTER &&
-                (!item["inputB"].is<unsigned int>() || section.inputB < 1 || section.inputB > inputs.size() || section.inputB == section.inputA)) return false;
-            if (section.enabled) {
-                if (section.stateTopic.isEmpty() || (section.type == TrackSectionType::AXLE_COUNTER && section.countTopic.isEmpty())) return false;
-                uint32_t mask = uint32_t(1) << (section.inputA - 1);
-                if (section.type == TrackSectionType::AXLE_COUNTER) mask |= uint32_t(1) << (section.inputB - 1);
-                if (mask & reservedInputs) { error = "Dos tramos habilitados no pueden compartir entradas."; return false; }
-                reservedInputs |= mask;
-            }
-            nextTracks.push_back(section);
-        }
-    }
-    for (const auto& section : nextTracks) {
-        if (!section.enabled) continue;
-        for (const auto& output : nextOutputs) {
-            if (!output.enabled) continue;
-            if (output.commandTopic == section.stateTopic ||
-                (section.type == TrackSectionType::AXLE_COUNTER && output.commandTopic == section.countTopic)) {
-                error = "Un topic de deteccion coincide con un topic de mando de rele.";
-                return false;
-            }
-        }
-        for (const auto& signal : nextSignals) {
-            if (!signal.enabled) continue;
-            if (signal.topic == section.stateTopic ||
-                (section.type == TrackSectionType::AXLE_COUNTER && signal.topic == section.countTopic)) {
-                error = "Un topic de deteccion coincide con un topic de mando de senal.";
-                return false;
-            }
-        }
-    }
-    // Persist a complete snapshot before changing the live configuration.
-    if (persist) {
-        DynamicJsonDocument saved(65536);
-        saved.set(doc);
-        saved["mqtt"]["password"] = nextMqtt.password;
-        saved["mqtt"].remove("passwordSet");
-        if (saved.overflowed()) { error = "Configuracion demasiado grande."; return false; }
-        String value;
-        serializeJson(saved, value);
-        if (prefs.putString("config_v1", value) != value.length()) {
-            error = "No se pudo guardar en NVS. No se aplicaron los cambios.";
+
+        if (c.payloadOn == c.payloadOff)
+            return false;
+
+        if (!topicField(c.topic) ||
+            (c.enabled && c.topic.isEmpty())) {
             return false;
         }
     }
-    signals = std::move(nextSignals);
-    trackSections = std::move(nextTracks);
-    mqtt = nextMqtt;
-    inputs = std::move(nextInputs); outputs = std::move(nextOutputs);
+
+
+    // ========================================================
+    // SALIDAS
+    // ========================================================
+
+    for (size_t i = 0; i < outputs.size(); ++i) {
+        error =
+            "RO" + String(i + 1) +
+            ": campos no validos, topics vacios o payloads iguales.";
+
+        JsonVariantConst item =
+            doc["outputs"][i];
+
+        if (!item.is<JsonObjectConst>() ||
+            !item["enabled"].is<bool>()) {
+            return false;
+        }
+
+        OutputConfig& c =
+            nextOutputs[i];
+
+        c.enabled =
+            item["enabled"].as<bool>();
+
+        if (!textField(item["name"], 64))
+            return false;
+
+        c.name =
+            item["name"].as<String>();
+
+        if (!textField(item["commandTopic"], 128))
+            return false;
+
+        c.commandTopic =
+            item["commandTopic"].as<String>();
+
+        if (!textField(item["payloadOn"], 256, true) ||
+            !textField(item["payloadOff"], 256, true)) {
+            return false;
+        }
+
+        c.payloadOn =
+            item["payloadOn"].as<String>();
+
+        c.payloadOff =
+            item["payloadOff"].as<String>();
+
+        if (!item["publishState"].is<bool>())
+            return false;
+
+        c.publishState =
+            item["publishState"].as<bool>();
+
+        if (!textField(item["stateTopic"], 128))
+            return false;
+
+        c.stateTopic =
+            item["stateTopic"].as<String>();
+
+        if (!textField(item["stateOn"], 256, true) ||
+            !textField(item["stateOff"], 256, true)) {
+            return false;
+        }
+
+        c.stateOn =
+            item["stateOn"].as<String>();
+
+        c.stateOff =
+            item["stateOff"].as<String>();
+
+        if (!item["retain"].is<bool>())
+            return false;
+
+        c.retain =
+            item["retain"].as<bool>();
+
+        if (item.containsKey("payloadJson") &&
+            !item["payloadJson"].is<bool>()) {
+            return false;
+        }
+
+        c.payloadJson =
+            item["payloadJson"] | false;
+
+        if (c.payloadJson &&
+            !JsonPayload::validPair(
+                c.payloadOn.c_str(),
+                c.payloadOff.c_str()
+            )) {
+            error =
+                "Payloads JSON ON/OFF no validos, "
+                "demasiado complejos o equivalentes.";
+            return false;
+        }
+
+        if (item.containsKey("stateJson") &&
+            !item["stateJson"].is<bool>()) {
+            return false;
+        }
+
+        c.stateJson =
+            item["stateJson"] | false;
+
+        if (item.containsKey("jsonPath") &&
+            !textField(item["jsonPath"], 64)) {
+            return false;
+        }
+
+        c.jsonPath =
+            item["jsonPath"] | "";
+
+        if (!c.jsonPath.isEmpty()) {
+            const char* path =
+                c.jsonPath.c_str();
+
+            bool segment = false;
+
+            for (size_t j = 0;
+                 j < c.jsonPath.length();
+                 ++j) {
+                if (path[j] == '.') {
+                    if (!segment)
+                        return false;
+
+                    segment = false;
+                } else {
+                    segment = true;
+                }
+            }
+
+            if (!segment)
+                return false;
+        }
+
+        if (c.stateJson &&
+            !JsonPayload::validPair(
+                c.stateOn.c_str(),
+                c.stateOff.c_str()
+            )) {
+            error =
+                "Payloads JSON de estado no validos, "
+                "demasiado complejos o equivalentes.";
+            return false;
+        }
+
+        if (c.payloadOn == c.payloadOff)
+            return false;
+
+        if (!topicField(c.commandTopic) ||
+            !topicField(c.stateTopic) ||
+            (c.enabled &&
+             (c.commandTopic.isEmpty() ||
+              (c.publishState && c.stateTopic.isEmpty()))) ||
+            (c.publishState &&
+             c.stateOn == c.stateOff)) {
+            return false;
+        }
+    }
+
+
+    // Evitar que publicaciones propias se interpreten como mandos.
+    for (const auto& output : nextOutputs) {
+        if (!output.enabled)
+            continue;
+
+        for (const auto& input : nextInputs) {
+            if (input.enabled &&
+                input.topic == output.commandTopic) {
+                error =
+                    "Un topic de entrada coincide con "
+                    "un topic de mando.";
+                return false;
+            }
+        }
+
+        for (const auto& state : nextOutputs) {
+            if (state.enabled &&
+                state.publishState &&
+                state.stateTopic == output.commandTopic) {
+                error =
+                    "Un topic de estado coincide con "
+                    "un topic de mando.";
+                return false;
+            }
+        }
+    }
+
+
+    // ========================================================
+    // SEÑALES
+    // ========================================================
+
+    std::vector<SignalConfig> nextSignals;
+
+    error =
+        "Senales: configuracion no valida "
+        "(maximo 8 senales, 8 focos y 12 aspectos por senal).";
+
+    if (!doc.containsKey("signals") &&
+        !signals.empty()) {
+        return false;
+    }
+
+    if (doc.containsKey("signals")) {
+        if (!doc["signals"].is<JsonArrayConst>() ||
+            doc["signals"].size() > 8) {
+            return false;
+        }
+
+        uint32_t reservedRelays = 0;
+
+        for (JsonObjectConst item :
+             doc["signals"].as<JsonArrayConst>()) {
+
+            if (!item["enabled"].is<bool>() ||
+                !textField(item["name"], 64) ||
+                !textField(item["topic"], 128) ||
+                !textField(item["jsonPath"], 64) ||
+                !item["lights"].is<JsonArrayConst>() ||
+                item["lights"].size() < 1 ||
+                item["lights"].size() > 8 ||
+                !item["aspects"].is<JsonArrayConst>() ||
+                item["aspects"].size() < 1 ||
+                item["aspects"].size() > 12) {
+                return false;
+            }
+
+            SignalConfig signal;
+
+            signal.enabled =
+                item["enabled"].as<bool>();
+
+            signal.name =
+                item["name"].as<String>();
+
+            signal.topic =
+                item["topic"].as<String>();
+
+            signal.jsonPath =
+                item["jsonPath"].as<String>();
+
+            if (!topicField(signal.topic) ||
+                signal.name.isEmpty() ||
+                (signal.enabled &&
+                 signal.topic.isEmpty())) {
+                return false;
+            }
+
+            if (!signal.jsonPath.isEmpty()) {
+                const char* path =
+                    signal.jsonPath.c_str();
+
+                for (size_t j = 0;
+                     j < signal.jsonPath.length();
+                     ++j) {
+                    if (path[j] == '.' &&
+                        (j == 0 ||
+                         path[j + 1] == '.' ||
+                         path[j + 1] == 0)) {
+                        return false;
+                    }
+                }
+            }
+
+            if (item.containsKey("blinkMs")) {
+                if (!item["blinkMs"].is<unsigned int>() ||
+                    item["blinkMs"].as<unsigned int>() < 250 ||
+                    item["blinkMs"].as<unsigned int>() > 10000) {
+                    return false;
+                }
+
+                signal.blinkMs =
+                    item["blinkMs"].as<uint16_t>();
+            }
+
+            uint32_t mask = 0;
+
+            for (JsonObjectConst light :
+                 item["lights"].as<JsonArrayConst>()) {
+
+                if (!textField(light["name"], 32) ||
+                    !light["relay"].is<unsigned int>() ||
+                    light["relay"].as<unsigned int>() < 1 ||
+                    light["relay"].as<unsigned int>() > outputs.size()) {
+                    return false;
+                }
+
+                SignalLight entry;
+
+                entry.name =
+                    light["name"].as<String>();
+
+                entry.relay =
+                    light["relay"].as<uint8_t>();
+
+                const uint32_t bit =
+                    uint32_t(1) << (entry.relay - 1);
+
+                if (mask & bit) {
+                    error =
+                        "Una senal no puede repetir un rele entre focos.";
+                    return false;
+                }
+
+                mask |= bit;
+                signal.lights.push_back(entry);
+            }
+
+            for (JsonObjectConst aspect :
+                 item["aspects"].as<JsonArrayConst>()) {
+
+                if (!textField(aspect["value"], 64) ||
+                    !aspect["on"].is<JsonArrayConst>()) {
+                    return false;
+                }
+
+                SignalAspect entry;
+
+                entry.value =
+                    aspect["value"].as<String>();
+
+                if (entry.value.isEmpty())
+                    return false;
+
+                for (const auto& previous :
+                     signal.aspects) {
+                    if (previous.value == entry.value)
+                        return false;
+                }
+
+                for (JsonVariantConst light :
+                     aspect["on"].as<JsonArrayConst>()) {
+
+                    if (!light.is<unsigned int>() ||
+                        light.as<unsigned int>() < 1 ||
+                        light.as<unsigned int>() > signal.lights.size()) {
+                        return false;
+                    }
+
+                    const uint8_t bit =
+                        uint8_t(
+                            1U <<
+                            (light.as<unsigned int>() - 1)
+                        );
+
+                    if (entry.mask & bit)
+                        return false;
+
+                    entry.mask |= bit;
+                }
+
+                if (aspect.containsKey("blink")) {
+                    if (!aspect["blink"].is<JsonArrayConst>())
+                        return false;
+
+                    for (JsonVariantConst light :
+                         aspect["blink"].as<JsonArrayConst>()) {
+
+                        if (!light.is<unsigned int>() ||
+                            light.as<unsigned int>() < 1 ||
+                            light.as<unsigned int>() >
+                                signal.lights.size()) {
+                            return false;
+                        }
+
+                        const uint8_t bit =
+                            uint8_t(
+                                1U <<
+                                (light.as<unsigned int>() - 1)
+                            );
+
+                        if ((entry.mask | entry.blink) & bit)
+                            return false;
+
+                        entry.blink |= bit;
+                    }
+                }
+
+                signal.aspects.push_back(entry);
+            }
+
+            if (signal.enabled) {
+                if (mask & reservedRelays) {
+                    error =
+                        "Dos senales habilitadas comparten reles.";
+                    return false;
+                }
+
+                reservedRelays |= mask;
+
+                for (size_t i = 0;
+                     i < outputs.size();
+                     ++i) {
+                    if ((mask & (1U << i)) &&
+                        nextOutputs[i].enabled) {
+                        error =
+                            "Deshabilita el mando individual de los "
+                            "reles asignados a una senal.";
+                        return false;
+                    }
+                }
+
+                for (const auto& input : nextInputs) {
+                    if (input.enabled &&
+                        input.topic == signal.topic) {
+                        error =
+                            "El topic de senal coincide con una "
+                            "publicacion de entrada.";
+                        return false;
+                    }
+                }
+
+                for (const auto& output : nextOutputs) {
+                    if (output.enabled &&
+                        output.publishState &&
+                        output.stateTopic == signal.topic) {
+                        error =
+                            "El topic de senal coincide con una "
+                            "publicacion de salida.";
+                        return false;
+                    }
+                }
+            }
+
+            nextSignals.push_back(signal);
+        }
+    }
+
+
+    // ========================================================
+    // CV TRADICIONALES
+    // ========================================================
+
+    std::vector<CvConfig> nextCvs;
+
+    error =
+        "CV: configuracion no valida "
+        "(maximo 16 CV, estacion/ID validos y entradas exclusivas).";
+
+    if (!doc.containsKey("cvs")) {
+        if (!cvs.empty())
+            return false;
+    } else {
+        if (!doc["cvs"].is<JsonArrayConst>() ||
+            doc["cvs"].size() > 16) {
+            return false;
+        }
+    }
+
+
+    // ========================================================
+    // CONTADORES DE EJES
+    // ========================================================
+
+    std::vector<AxleCounterConfig> nextAxleCounters;
+
+    if (!doc.containsKey("axleCounters")) {
+        if (!axleCounters.empty())
+            return false;
+    } else {
+        if (!doc["axleCounters"].is<JsonArrayConst>() ||
+            doc["axleCounters"].size() > 16) {
+            error =
+                "Cuenta-ejes: configuracion no valida "
+                "(maximo 16 contadores).";
+            return false;
+        }
+    }
+
+
+    // Una entrada fisica no puede pertenecer simultaneamente
+    // a dos elementos de deteccion.
+    uint32_t reservedInputs = 0;
+
+
+    if (doc.containsKey("cvs")) {
+        for (JsonObjectConst item :
+             doc["cvs"].as<JsonArrayConst>()) {
+
+            if (!item["enabled"].is<bool>() ||
+                !textField(item["station"], 64) ||
+                !textField(item["id"], 64) ||
+                !item["input"].is<unsigned int>()) {
+                return false;
+            }
+
+            CvConfig cv;
+
+            cv.enabled =
+                item["enabled"].as<bool>();
+
+            cv.station =
+                item["station"].as<String>();
+
+            cv.id =
+                item["id"].as<String>();
+
+            cv.input =
+                item["input"].as<uint8_t>();
+
+            if (cv.input < 1 ||
+                cv.input > inputs.size()) {
+                return false;
+            }
+
+            if (cv.enabled) {
+                if (!mqttIdField(cv.station) ||
+                    !mqttIdField(cv.id)) {
+                    error =
+                        "CV: estacion e ID son obligatorios y "
+                        "no pueden contener espacios, /, + o #.";
+                    return false;
+                }
+
+                const uint32_t bit =
+                    uint32_t(1) << (cv.input - 1);
+
+                if (reservedInputs & bit) {
+                    error =
+                        "Dos elementos de deteccion habilitados "
+                        "no pueden compartir una entrada.";
+                    return false;
+                }
+
+                reservedInputs |= bit;
+            }
+
+            nextCvs.push_back(cv);
+        }
+    }
+
+
+    if (doc.containsKey("axleCounters")) {
+        for (JsonObjectConst item :
+             doc["axleCounters"].as<JsonArrayConst>()) {
+
+            if (!item["enabled"].is<bool>() ||
+                !textField(item["station"], 64) ||
+                !textField(item["id"], 64) ||
+                !item["inputA"].is<unsigned int>() ||
+                !item["inputB"].is<unsigned int>()) {
+                return false;
+            }
+
+            AxleCounterConfig counter;
+
+            counter.enabled =
+                item["enabled"].as<bool>();
+
+            counter.station =
+                item["station"].as<String>();
+
+            counter.id =
+                item["id"].as<String>();
+
+            counter.inputA =
+                item["inputA"].as<uint8_t>();
+
+            counter.inputB =
+                item["inputB"].as<uint8_t>();
+
+            if (counter.inputA < 1 ||
+                counter.inputA > inputs.size() ||
+                counter.inputB < 1 ||
+                counter.inputB > inputs.size() ||
+                counter.inputA == counter.inputB) {
+                error =
+                    "Cuenta-ejes: A y B deben ser entradas "
+                    "validas y diferentes.";
+                return false;
+            }
+
+            if (counter.enabled) {
+                if (!mqttIdField(counter.station) ||
+                    !mqttIdField(counter.id)) {
+                    error =
+                        "Cuenta-ejes: estacion e ID son obligatorios "
+                        "y no pueden contener espacios, /, + o #.";
+                    return false;
+                }
+
+                const uint32_t mask =
+                    (uint32_t(1) << (counter.inputA - 1)) |
+                    (uint32_t(1) << (counter.inputB - 1));
+
+                if (reservedInputs & mask) {
+                    error =
+                        "Dos elementos de deteccion habilitados "
+                        "no pueden compartir entradas.";
+                    return false;
+                }
+
+                reservedInputs |= mask;
+            }
+
+            nextAxleCounters.push_back(counter);
+        }
+    }
+
+
+    // Las entradas reservadas por CV / CE no pueden publicar tambien
+    // como entradas MQTT genericas.
+    for (size_t i = 0; i < nextInputs.size(); ++i) {
+        if ((reservedInputs & (uint32_t(1) << i)) &&
+            nextInputs[i].enabled) {
+            error =
+                "DI" + String(i + 1) +
+                " esta reservada por deteccion. "
+                "Deshabilita su publicacion MQTT generica.";
+            return false;
+        }
+    }
+
+
+    // IDs duplicados dentro del mismo tipo no son validos.
+    for (size_t i = 0; i < nextCvs.size(); ++i) {
+        if (!nextCvs[i].enabled) continue;
+
+        for (size_t j = i + 1;
+             j < nextCvs.size();
+             ++j) {
+            if (nextCvs[j].enabled &&
+                nextCvs[i].station == nextCvs[j].station &&
+                nextCvs[i].id == nextCvs[j].id) {
+                error =
+                    "Dos CV habilitados tienen la misma estacion e ID.";
+                return false;
+            }
+        }
+    }
+
+    for (size_t i = 0;
+         i < nextAxleCounters.size();
+         ++i) {
+        if (!nextAxleCounters[i].enabled)
+            continue;
+
+        for (size_t j = i + 1;
+             j < nextAxleCounters.size();
+             ++j) {
+            if (nextAxleCounters[j].enabled &&
+                nextAxleCounters[i].station ==
+                    nextAxleCounters[j].station &&
+                nextAxleCounters[i].id ==
+                    nextAxleCounters[j].id) {
+                error =
+                    "Dos cuenta-ejes habilitados tienen "
+                    "la misma estacion e ID.";
+                return false;
+            }
+        }
+    }
+
+
+    // ========================================================
+    // COLISIONES MQTT DE DETECCION
+    // ========================================================
+
+    for (const auto& cv : nextCvs) {
+        if (!cv.enabled)
+            continue;
+
+        const String topic =
+            cvTopic(cv);
+
+        for (const auto& output : nextOutputs) {
+            if (output.enabled &&
+                output.commandTopic == topic) {
+                error =
+                    "El topic de un CV coincide con "
+                    "un mando de rele.";
+                return false;
+            }
+        }
+
+        for (const auto& signal : nextSignals) {
+            if (signal.enabled &&
+                signal.topic == topic) {
+                error =
+                    "El topic de un CV coincide con "
+                    "un mando de senal.";
+                return false;
+            }
+        }
+    }
+
+
+    for (const auto& counter :
+         nextAxleCounters) {
+        if (!counter.enabled)
+            continue;
+
+        const String topic =
+            axleTopic(counter);
+
+        for (const auto& output : nextOutputs) {
+            if (output.enabled &&
+                output.commandTopic == topic) {
+                error =
+                    "El topic de un cuenta-ejes coincide "
+                    "con un mando de rele.";
+                return false;
+            }
+        }
+
+        for (const auto& signal : nextSignals) {
+            if (signal.enabled &&
+                signal.topic == topic) {
+                error =
+                    "El topic de un cuenta-ejes coincide "
+                    "con un mando de senal.";
+                return false;
+            }
+        }
+    }
+
+
+    // ========================================================
+    // GUARDAR SNAPSHOT COMPLETO
+    // ========================================================
+
+    if (persist) {
+        DynamicJsonDocument saved(65536);
+
+        saved.set(doc);
+
+        saved["mqtt"]["password"] =
+            nextMqtt.password;
+
+        saved["mqtt"].remove(
+            "passwordSet"
+        );
+
+        // No conservar campos informativos generados por toJson().
+        if (saved["cvs"].is<JsonArray>()) {
+            for (JsonObject item :
+                 saved["cvs"].as<JsonArray>()) {
+                item.remove("topic");
+            }
+        }
+
+        if (saved["axleCounters"].is<JsonArray>()) {
+            for (JsonObject item :
+                 saved["axleCounters"].as<JsonArray>()) {
+                item.remove("topic");
+            }
+        }
+
+        // Eliminar definitivamente el modelo antiguo.
+        saved.remove("trackSections");
+
+        if (saved.overflowed()) {
+            error =
+                "Configuracion demasiado grande.";
+            return false;
+        }
+
+        String value;
+        serializeJson(saved, value);
+
+        if (prefs.putString(
+                "config_v1",
+                value
+            ) != value.length()) {
+
+            error =
+                "No se pudo guardar en NVS. "
+                "No se aplicaron los cambios.";
+
+            return false;
+        }
+    }
+
+
+    // ========================================================
+    // APLICAR
+    // ========================================================
+
+    signals =
+        std::move(nextSignals);
+
+    cvs =
+        std::move(nextCvs);
+
+    axleCounters =
+        std::move(nextAxleCounters);
+
+    mqtt =
+        nextMqtt;
+
+    inputs =
+        std::move(nextInputs);
+
+    outputs =
+        std::move(nextOutputs);
+
     error = "";
+
     return true;
 }
 
-bool ConfigManager::relayAssigned(uint8_t channel) const {
-    if (channel >= outputs.size()) return false;
-    for (const auto& signal : signals)
-        if (signal.enabled && (signal.relayMask() & (1U << channel))) return true;
+
+bool ConfigManager::relayAssigned(
+    uint8_t channel
+) const {
+    if (channel >= outputs.size())
+        return false;
+
+    for (const auto& signal : signals) {
+        if (signal.enabled &&
+            (signal.relayMask() &
+             (uint32_t(1) << channel))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
+bool ConfigManager::inputAssigned(
+    uint8_t channel
+) const {
+    if (channel >= inputs.size())
+        return false;
+
+    const uint8_t logical =
+        channel + 1;
+
+    for (const auto& cv : cvs) {
+        if (cv.enabled &&
+            cv.input == logical) {
+            return true;
+        }
+    }
+
+    for (const auto& counter :
+         axleCounters) {
+        if (counter.enabled &&
+            (counter.inputA == logical ||
+             counter.inputB == logical)) {
+            return true;
+        }
+    }
+
     return false;
 }

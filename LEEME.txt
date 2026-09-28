@@ -1,0 +1,23 @@
+InterlockEasy - cambio CV / Cuenta-ejes
+
+Sustituir:
+src/ConfigManager.h
+src/ConfigManager.cpp
+src/DetectionManager.h
+src/DetectionManager.cpp
+src/MqttManager.cpp
+src/IOManager.cpp
+src/WebManager.cpp
+data/detection.html
+data/detection.js
+data/dashboard.js
+data/index.html
+
+No es necesario modificar IOManager.h ni WebManager.h.
+
+Después:
+1. Compilar firmware.
+2. Subir firmware.
+3. Subir LittleFS: pio run -t uploadfs
+4. La detección antigua trackSections se descarta al migrar.
+5. Reconfigurar CV/CE desde /detection.html.

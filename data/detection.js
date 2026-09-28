@@ -1,81 +1,18 @@
-(() => {
-  const form = document.getElementById('detection-form');
-  const area = document.getElementById('track-editors');
-  const message = document.getElementById('config-message');
-  const loadButton = document.getElementById('load-config');
-  const saveButton = document.getElementById('save-config');
-  const editors = [];
-  let inputCount = 0, busy = false;
-
-  async function request(options = {}) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), options.method === 'POST' ? 15000 : 5000);
-    try {
-      const response = await fetch('/api/config', {...options, cache:'no-store', signal:controller.signal});
-      if (!response.ok) throw new Error(await response.text());
-      return response.json();
-    } finally { clearTimeout(timer); }
-  }
-  function lock(value) { busy = value; loadButton.disabled = value; saveButton.disabled = value; }
-  function field(parent, labelText, kind, value, maxLength) {
-    const label = document.createElement('label'); label.textContent = labelText;
-    const node = document.createElement(kind === 'textarea' ? 'textarea' : kind === 'select' ? 'select' : 'input');
-    if (kind === 'checkbox') { node.type = 'checkbox'; node.checked = !!value; }
-    else if (kind === 'number') { node.type = 'number'; node.value = value; node.min = 1; node.max = inputCount; }
-    else if (kind !== 'select') { node.value = value ?? ''; if (maxLength) node.maxLength = maxLength; }
-    if (kind === 'textarea') node.rows = 3;
-    label.append(node); parent.append(label); return node;
-  }
-  function addEditor(initial = {}) {
-    if (editors.length >= 16) { message.textContent = 'Máximo 16 tramos.'; return; }
-    const box = document.createElement('fieldset');
-    const legend = document.createElement('legend'); legend.textContent = 'Tramo ' + (editors.length + 1); box.append(legend);
-    const grid = document.createElement('div'); grid.className = 'fields'; box.append(grid);
-    const c = {};
-    c.enabled = field(grid, 'Tramo habilitado', 'checkbox', initial.enabled);
-    c.type = field(grid, 'Tipo', 'select');
-    for (const [value, text] of [['linear','CV lineal'],['axleCounter','Cuenta ejes']]) { const option=document.createElement('option'); option.value=value; option.textContent=text; c.type.append(option); }
-    c.type.value = initial.type || 'linear';
-    c.name = field(grid, 'Nombre', 'text', initial.name || 'Nuevo tramo', 64);
-    c.inputA = field(grid, 'Entrada A / CV', 'number', initial.inputA || 1);
-    c.inputB = field(grid, 'Entrada B (cuenta ejes)', 'number', initial.inputB || Math.min(2,inputCount));
-    c.stateTopic = field(grid, 'Topic MQTT de estado', 'text', initial.stateTopic || '', 128);
-    c.countTopic = field(grid, 'Topic MQTT del contador', 'text', initial.countTopic || '', 128);
-    c.payloadOccupied = field(grid, 'Payload ocupado', 'textarea', initial.payloadOccupied || '{"Estado":"Ocupado"}', 256);
-    c.payloadFree = field(grid, 'Payload libre', 'textarea', initial.payloadFree || '{"Estado":"Libre"}', 256);
-    c.retain = field(grid, 'Retener publicaciones', 'checkbox', initial.retain ?? true);
-    const remove = document.createElement('button'); remove.type='button'; remove.textContent='Eliminar tramo'; box.append(remove);
-    const editor = {box,c}; editors.push(editor);
-    remove.onclick = () => { editors.splice(editors.indexOf(editor),1); box.remove(); };
-    const update = () => { const axle=c.type.value==='axleCounter'; c.inputB.parentElement.hidden=!axle; c.countTopic.parentElement.hidden=!axle; };
-    c.type.onchange=update; update(); area.append(box);
-  }
-  function read(editor) {
-    const c=editor.c; return {enabled:c.enabled.checked,type:c.type.value,name:c.name.value,inputA:Number(c.inputA.value),inputB:Number(c.inputB.value),stateTopic:c.stateTopic.value,countTopic:c.countTopic.value,payloadOccupied:c.payloadOccupied.value,payloadFree:c.payloadFree.value,retain:c.retain.checked};
-  }
-  async function load() {
-    if (busy) return; lock(true); message.textContent='Cargando configuración…';
-    try {
-      const data=await request(); if (!Array.isArray(data.inputs) || !Array.isArray(data.trackSections)) throw new Error('Respuesta no válida');
-      inputCount=data.inputs.length; editors.splice(0); area.replaceChildren(); data.trackSections.forEach(addEditor);
-      form.hidden=false; message.textContent='Configuración cargada.';
-    } catch(error) { message.textContent='No se pudo cargar: '+error.message; }
-    finally { lock(false); }
-  }
-  document.getElementById('add-track').onclick=()=>addEditor(); loadButton.onclick=load;
-  form.onsubmit=async event => {
-    event.preventDefault(); if (busy) return;
-    const tracks=editors.map(read), used=new Set();
-    for (const track of tracks) {
-      const axle=track.type==='axleCounter';
-      if (!track.name.trim() || !Number.isInteger(track.inputA) || track.inputA<1 || track.inputA>inputCount || (axle && (!Number.isInteger(track.inputB) || track.inputB<1 || track.inputB>inputCount || track.inputA===track.inputB)) || track.payloadOccupied===track.payloadFree) { message.textContent='Revisa nombres, entradas y payloads.'; return; }
-      if (track.enabled && (!track.stateTopic || (axle && !track.countTopic))) { message.textContent='Los tramos habilitados necesitan sus topics MQTT.'; return; }
-      if (track.enabled) for (const input of axle?[track.inputA,track.inputB]:[track.inputA]) { if (used.has(input)) {message.textContent='Dos tramos habilitados no pueden compartir entradas.'; return;} used.add(input); }
-    }
-    lock(true); message.textContent='Guardando…';
-    try { const data=await request(); data.trackSections=tracks; await request({method:'POST',headers:{'Content-Type':'application/json','X-Interlock':'1'},body:JSON.stringify(data)}); message.textContent='Configuración guardada y aplicada.'; }
-    catch(error) { message.textContent='No se pudo guardar: '+error.message; }
-    finally { lock(false); }
-  };
-  load();
-})();
+(()=>{
+const form=document.getElementById('detection-form'),cvArea=document.getElementById('cv-editors'),ceArea=document.getElementById('ce-editors'),message=document.getElementById('config-message'),loadButton=document.getElementById('load-config'),saveButton=document.getElementById('save-config');
+const cvs=[],ces=[];let inputCount=0,busy=false;
+async function request(options={}){const c=new AbortController(),t=setTimeout(()=>c.abort(),options.method==='POST'?15000:5000);try{const r=await fetch('/api/config',{...options,cache:'no-store',signal:c.signal});if(!r.ok)throw new Error(await r.text());return r.json();}finally{clearTimeout(t);}}
+function lock(v){busy=v;loadButton.disabled=v;saveButton.disabled=v;}
+function field(parent,text,type,value,max){const l=document.createElement('label');l.textContent=text;const n=document.createElement('input');n.type=type;if(type==='checkbox')n.checked=!!value;else{n.value=value??'';if(max)n.maxLength=max;}if(type==='number'){n.min=1;n.max=inputCount;}l.append(n);parent.append(l);return n;}
+function addCv(initial={}){if(cvs.length>=16)return;const box=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent='CV '+(cvs.length+1);box.append(legend);const grid=document.createElement('div');grid.className='fields';box.append(grid);const c={enabled:field(grid,'Habilitado','checkbox',initial.enabled),station:field(grid,'Estación / dependencia','text',initial.station||'',64),id:field(grid,'ID del CV','text',initial.id||'',64),input:field(grid,'Entrada','number',initial.input||1)};const p=document.createElement('p');p.className='muted';const update=()=>p.textContent=`Topic: cv/${c.station.value.trim()}/${c.id.value.trim()}/field_state`;c.station.oninput=c.id.oninput=update;update();box.append(p);const remove=document.createElement('button');remove.type='button';remove.textContent='Eliminar CV';box.append(remove);const e={box,c};cvs.push(e);remove.onclick=()=>{cvs.splice(cvs.indexOf(e),1);box.remove();};cvArea.append(box);}
+function addCe(initial={}){if(ces.length>=16)return;const box=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent='Cuenta-ejes '+(ces.length+1);box.append(legend);const grid=document.createElement('div');grid.className='fields';box.append(grid);const c={enabled:field(grid,'Habilitado','checkbox',initial.enabled),station:field(grid,'Estación / dependencia','text',initial.station||'',64),id:field(grid,'ID del CE','text',initial.id||'',64),inputA:field(grid,'Detector A','number',initial.inputA||1),inputB:field(grid,'Detector B','number',initial.inputB||Math.min(2,inputCount))};const p=document.createElement('p');p.className='muted';const update=()=>p.textContent=`Topic: cejes/${c.station.value.trim()}/${c.id.value.trim()}/event`;c.station.oninput=c.id.oninput=update;update();box.append(p);const remove=document.createElement('button');remove.type='button';remove.textContent='Eliminar cuenta-ejes';box.append(remove);const e={box,c};ces.push(e);remove.onclick=()=>{ces.splice(ces.indexOf(e),1);box.remove();};ceArea.append(box);}
+const validId=v=>v&&!/[\s\/+#]/.test(v);
+const readCv=e=>({enabled:e.c.enabled.checked,station:e.c.station.value.trim(),id:e.c.id.value.trim(),input:Number(e.c.input.value)});
+const readCe=e=>({enabled:e.c.enabled.checked,station:e.c.station.value.trim(),id:e.c.id.value.trim(),inputA:Number(e.c.inputA.value),inputB:Number(e.c.inputB.value)});
+async function load(){if(busy)return;lock(true);message.textContent='Cargando configuración…';try{const d=await request();if(!Array.isArray(d.inputs)||!Array.isArray(d.cvs)||!Array.isArray(d.axleCounters))throw new Error('Respuesta no válida');inputCount=d.inputs.length;cvs.splice(0);ces.splice(0);cvArea.replaceChildren();ceArea.replaceChildren();d.cvs.forEach(addCv);d.axleCounters.forEach(addCe);form.hidden=false;message.textContent='Configuración cargada.';}catch(e){message.textContent='No se pudo cargar: '+e.message;}finally{lock(false);}}
+document.getElementById('add-cv').onclick=()=>addCv();document.getElementById('add-ce').onclick=()=>addCe();loadButton.onclick=load;
+form.onsubmit=async ev=>{ev.preventDefault();if(busy)return;const cvList=cvs.map(readCv),ceList=ces.map(readCe),used=new Set(),ids=new Set();
+for(const x of cvList){if(!Number.isInteger(x.input)||x.input<1||x.input>inputCount){message.textContent='Revisa la entrada de los CV.';return;}if(x.enabled){if(!validId(x.station)||!validId(x.id)){message.textContent='Los CV habilitados necesitan estación e ID válidos.';return;}const k='cv:'+x.station+':'+x.id;if(ids.has(k)||used.has(x.input)){message.textContent='Hay IDs o entradas de detección repetidos.';return;}ids.add(k);used.add(x.input);}}
+for(const x of ceList){if(!Number.isInteger(x.inputA)||!Number.isInteger(x.inputB)||x.inputA<1||x.inputA>inputCount||x.inputB<1||x.inputB>inputCount||x.inputA===x.inputB){message.textContent='Revisa los detectores A/B de los cuenta-ejes.';return;}if(x.enabled){if(!validId(x.station)||!validId(x.id)){message.textContent='Los cuenta-ejes habilitados necesitan estación e ID válidos.';return;}const k='ce:'+x.station+':'+x.id;if(ids.has(k)||used.has(x.inputA)||used.has(x.inputB)){message.textContent='Hay IDs o entradas de detección repetidos.';return;}ids.add(k);used.add(x.inputA);used.add(x.inputB);}}
+lock(true);message.textContent='Guardando…';try{const d=await request();for(const n of used)if(d.inputs[n-1])d.inputs[n-1].enabled=false;d.cvs=cvList;d.axleCounters=ceList;delete d.trackSections;const r=await request({method:'POST',headers:{'Content-Type':'application/json','X-Interlock':'1'},body:JSON.stringify(d)});message.textContent=r.restarting?'Configuración guardada. El módulo se está reiniciando…':'Configuración guardada.';}catch(e){message.textContent='No se pudo guardar: '+e.message;}finally{lock(false);}};
+load();})();

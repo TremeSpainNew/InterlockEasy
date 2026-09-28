@@ -1,23 +1,20 @@
 <!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Detección de vía · Interlock Easy</title>
-<link rel="stylesheet" href="/style.css">
-</head>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Detección de vía · Interlock Easy</title><link rel="stylesheet" href="/style.css"></head>
 <body>
 <header><div class="brand"><span class="brand-mark" aria-hidden="true">IE</span><div><strong>Interlock Easy</strong><small>Control de entradas y salidas</small></div></div><nav aria-label="Navegación principal"><a href="/index.html">Resumen</a><a href="/mqtt.html">MQTT</a><a href="/inputs.html">Entradas</a><a href="/outputs.html">Salidas</a><a href="/signals.html">Señales</a><a href="/detection.html" aria-current="page">Detección</a><a href="/hardware.html">Hardware</a></nav></header>
 <main>
-<div class="hero"><div><p class="eyebrow">Configuración</p><h1>Detección de vía</h1><p>Configura circuitos de vía lineales y contadores de ejes.</p></div></div>
+<div class="hero"><div><p class="eyebrow">Configuración</p><h1>Detección de vía</h1><p>CV tradicionales y puntos contadores de ejes independientes.</p></div></div>
 <section class="config-panel">
-<div class="section-head"><h2>Tramos configurados</h2><button type="button" id="load-config">Recargar configuración</button></div>
-<p class="intro">Un CV lineal utiliza una entrada. Un cuenta ejes utiliza dos detectores: el primer extremo fija el sentido, los pulsos del mismo extremo suman y los del opuesto restan.</p>
+<div class="section-head"><div><h2>Configuración</h2><p class="muted">Los topics MQTT se generan automáticamente.</p></div><button type="button" id="load-config">Recargar configuración</button></div>
 <p id="config-message" role="status">Cargando configuración…</p>
-<form id="detection-form" hidden><div id="track-editors"></div><button type="button" id="add-track">Añadir tramo</button><div class="actions"><button type="submit" id="save-config">Guardar y aplicar</button><span>Los cuenta ejes arrancan ocupados y requieren puesta a cero desde Resumen.</span></div></form>
-</section>
-<footer><a href="/index.html">← Volver al resumen</a></footer>
-</main>
-<script src="/detection.js" defer></script>
-</body>
-</html>
+<form id="detection-form" hidden>
+<h2>Circuitos de vía tradicionales</h2>
+<p class="intro">Cada CV utiliza una entrada y publica <code>{"estado":"LIBRE"}</code> o <code>{"estado":"OCUPADO"}</code> en <code>cv/&lt;estación&gt;/&lt;id&gt;/field_state</code>.</p>
+<div id="cv-editors"></div><button type="button" id="add-cv">Añadir CV</button>
+<h2>Contadores de ejes</h2>
+<p class="intro">Cada punto CE utiliza dos detectores A/B y publica <code>Nominal:N</code>, <code>Reverse:N</code>, <code>Error</code> y <code>conexion</code>. El estado del CV por cuenta-ejes lo calcula Enclavamiento.</p>
+<div id="ce-editors"></div><button type="button" id="add-ce">Añadir cuenta-ejes</button>
+<div class="actions"><button type="submit" id="save-config">Guardar configuración</button><span>Las entradas utilizadas por CV/CE quedan reservadas para detección.</span></div>
+</form></section>
+<footer><a href="/index.html">← Volver al resumen</a></footer></main>
+<script src="/detection.js" defer></script></body></html>
