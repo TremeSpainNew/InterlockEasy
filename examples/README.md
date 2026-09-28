@@ -1,6 +1,19 @@
 # Perfiles de hardware
 
-El perfil activo es `data/config.json`. Se carga al arrancar desde LittleFS; los cambios requieren `pio run -t uploadfs` y reinicio. También se puede editar en la página **Hardware** de la web. Guarda el JSON validado sin modificar el hardware activo; reinicia manualmente para aplicarlo. El guardado escribe y verifica un archivo temporal antes de sustituir `config.json`. Descarga una copia para actualizar el archivo local: `uploadfs` sobrescribe los cambios realizados desde la web.
+El perfil activo es `data/config.json`. Se carga al arrancar desde LittleFS; los cambios locales requieren `pio run -t uploadfs` y reinicio. También se puede editar en la página **Hardware** de la web; al guardar, el módulo valida el archivo y se reinicia automáticamente. El guardado escribe y verifica un archivo temporal antes de sustituir `config.json`. Descarga una copia para actualizar el archivo local: `uploadfs` sobrescribe los cambios realizados desde la web.
+
+La red se elige con `network`. Para Ethernet usa `{"type":"ethernet"}` y conserva el bloque `ethernet` con los pines W5500. Para Wi-Fi usa, por ejemplo:
+
+```json
+"network": {
+  "type": "wifi",
+  "ssid": "MiRed",
+  "password": "MiClave",
+  "hostname": "InterlockEasy"
+}
+```
+
+Al guardar desde la web el módulo se reinicia automáticamente. Si no logra conectarse al Wi-Fi en 30 segundos, crea el punto de acceso `InterlockEasy-Setup` con contraseña `InterlockEasy`; conéctate y abre `http://192.168.4.1/hardware.html` para corregir el archivo. El SSID y la contraseña quedan almacenados en `config.json` y se muestran en el editor de Hardware.
 
 - `../data/config.json`: Waveshare original, 8 entradas GPIO y 8 relés TCA9554.
 - `config-mixed-16di-32ro.json`: 16 entradas PCF8575 y 32 salidas repartidas entre MCP23017, PCF8574 y TCA9554. Es un ejemplo de cableado diferente: no cargar en la Waveshare sin adaptar el hardware.

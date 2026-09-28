@@ -3,6 +3,7 @@
 
 HardwareConfig Hardware;
 void HardwareConfig::defaults() {
+    networkType = NetworkType::ETHERNET;
     modules = {{ModuleType::GPIO,0},{ModuleType::TCA9554,0x20}};
     inputs.clear(); outputs.clear();
     for (uint8_t i=0;i<8;++i) { inputs.push_back({0,uint8_t(i+4),false,true}); outputs.push_back({1,i,false,false}); }
@@ -23,12 +24,33 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
         dest=n; return true;
     };
     if (!pin(doc["i2c"]["sda"],next.sda,true) || !pin(doc["i2c"]["scl"],next.scl,true)) return false;
-    if (doc.containsKey("ethernet")) {
+    String network = doc["network"]["type"] | "ethernet";
+    if (network == "wifi") {
+        next.networkType = NetworkType::WIFI;
+        if (!doc["network"]["ssid"].is<const char*>() || !doc["network"]["password"].is<const char*>()) return false;
+        next.wifiSsid = doc["network"]["ssid"].as<String>();
+        next.wifiPassword = doc["network"]["password"].as<String>();
+        next.hostname = doc["network"]["hostname"] | "InterlockEasy";
+        if (next.wifiSsid.isEmpty() || next.wifiSsid.length() > 32 ||
+            next.wifiPassword.length() > 63 || next.hostname.isEmpty() || next.hostname.length() > 32 ||
+            next.hostname.indexOf(' ') >= 0) {
+            error = "WiFi: SSID, password o hostname no validos.";
+            return false;
+        }
+    } else if (network == "ethernet") {
+        next.networkType = NetworkType::ETHERNET;
+    } else {
+        error = "Red: type debe ser ethernet o wifi.";
+        return false;
+    }
+    if (next.networkType == NetworkType::ETHERNET && doc.containsKey("ethernet")) {
         if (doc["ethernet"]["type"] != "w5500" || !pin(doc["ethernet"]["sclk"],next.sclk,true) ||
             !pin(doc["ethernet"]["miso"],next.miso,false) || !pin(doc["ethernet"]["mosi"],next.mosi,true) || !pin(doc["ethernet"]["cs"],next.cs,true)) return false;
     }
     bool pins[GPIO_NUM_MAX] = {};
-    for (int n : {next.sda,next.scl,next.sclk,next.miso,next.mosi,next.cs}) {if(pins[n])return false; pins[n]=true;}
+    for (int n : {next.sda,next.scl}) {if(pins[n])return false; pins[n]=true;}
+    if (next.networkType == NetworkType::ETHERNET)
+        for (int n : {next.sclk,next.miso,next.mosi,next.cs}) {if(pins[n])return false; pins[n]=true;}
     bool addresses[128] = {};
     for (JsonObjectConst m : doc["modules"].as<JsonArrayConst>()) {
         HardwareModule module{};
@@ -81,6 +103,13 @@ void HardwareConfig::toJson(JsonDocument& doc) const {
     doc["version"] = 1;
     doc["inputCount"] = inputs.size(); doc["outputCount"] = outputs.size();
     doc["i2c"]["sda"] = sda; doc["i2c"]["scl"] = scl;
+    auto network = doc.createNestedObject("network");
+    network["type"] = networkType == NetworkType::WIFI ? "wifi" : "ethernet";
+    if (networkType == NetworkType::WIFI) {
+        network["ssid"] = wifiSsid;
+        network["password"] = wifiPassword;
+        network["hostname"] = hostname;
+    }
     auto eth = doc.createNestedObject("ethernet");
     eth["type"] = "w5500"; eth["sclk"] = sclk; eth["miso"] = miso;
     eth["mosi"] = mosi; eth["cs"] = cs;

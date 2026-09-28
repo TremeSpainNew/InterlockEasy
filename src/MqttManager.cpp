@@ -4,11 +4,12 @@
 #include "IOManager.h"
 #include "JsonPayload.h"
 #include "SignalManager.h"
+#include "DetectionManager.h"
 
 MqttManager MQTT;
 
 void MqttManager::begin() {
-    mqtt = new PubSubClient(Network.createClient());
+    mqtt = new PubSubClient(Connectivity.createClient());
     reload();
     mqtt->setCallback(callback);
 }
@@ -29,7 +30,7 @@ bool MqttManager::connected() {
 }
 
 void MqttManager::reconnect() {
-    if (!mqtt || Config.mqtt.host.isEmpty() || !Network.connected() || mqtt->connected()) return;
+    if (!mqtt || Config.mqtt.host.isEmpty() || !Connectivity.connected() || mqtt->connected()) return;
     if (millis() - lastReconnect < 5000) return;
     lastReconnect = millis();
 
@@ -49,6 +50,7 @@ void MqttManager::reconnect() {
         for (uint8_t i = 0; i < NUM_INPUTS; ++i) if (IO.inputReady(i)) publishInput(i, IO.getInput(i));
         if (IO.outputsReady())
             for (uint8_t i = 0; i < NUM_OUTPUTS; ++i) publishOutput(i, IO.getOutput(i));
+        Detections.publishAll();
     } else {
         Serial.printf("MQTT error: %d\n", mqtt->state());
     }
@@ -106,6 +108,11 @@ void MqttManager::publishOutput(uint8_t channel, bool state) {
 
     const String &payload = state ? cfg.stateOn : cfg.stateOff;
     mqtt->publish(cfg.stateTopic.c_str(), payload.c_str(), cfg.retain);
+}
+
+bool MqttManager::publishValue(const String& topic, const String& payload, bool retain) {
+    return mqtt && mqtt->connected() && !topic.isEmpty() &&
+           mqtt->publish(topic.c_str(), payload.c_str(), retain);
 }
 
 void MqttManager::callback(char* topic, byte* payload, unsigned int length) {

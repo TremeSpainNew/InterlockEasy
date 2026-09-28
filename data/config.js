@@ -9,6 +9,8 @@
   let controls = null;
   let outputCount = 0;
   let busy = false;
+  let retryTimer = null;
+  let retryCount = 0;
   let signalEditors = [];
   const common = [['enabled','MQTT habilitado','checkbox'],['name','Nombre','text',64],['payloadJson','Payloads en formato JSON','checkbox'],['payloadOn','Payload ON / activo','textarea',256],['payloadOff','Payload OFF / inactivo','textarea',256],['retain','Retener estado en el broker','checkbox']];
   function fields(parent, definitions, values) {
@@ -81,9 +83,9 @@
     box.append(button('Eliminar señal', () => {signalEditors.splice(signalEditors.indexOf(editor),1); box.remove();}));
     signalEditors.push(editor);
   }
-  async function request(options) {
+  async function request(options = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const timer = setTimeout(() => controller.abort(), options.method === 'POST' ? 15000 : 5000);
     try {
       const response = await fetch('/api/config', {...options, cache:'no-store', signal:controller.signal});
       if (!response.ok) throw new Error(await response.text());
@@ -91,8 +93,9 @@
     } finally {clearTimeout(timer);}
   }
   function lock(value) {busy = value; load.disabled = value; save.disabled = value;}
-  async function loadConfig() {
+  async function loadConfig(manual = false) {
     if (busy) return;
+    if (manual) {clearTimeout(retryTimer); retryCount = 0;}
     lock(true); message.textContent = 'Cargando…';
     try {
       const data = await request();
@@ -126,11 +129,20 @@
       const help = document.createElement('p');
       help.textContent = 'JSON: escribe el documento completo para publicar, por ejemplo {"estado":true}. Para recibir un campo, indica su ruta (estado o datos.estado) y valores JSON como true / false o "ON" / "OFF". Con ruta vacía se compara el documento completo, sin importar espacios ni orden de claves. Máximo 256 bytes por payload.';
       if (page === 'inputs' || page === 'outputs' || page === 'all') container.append(help);
+      retryCount = 0;
       form.hidden = false; message.textContent = 'Configuración cargada. Edita y guarda para aplicar.';
-    } catch(error) {message.textContent = 'No se pudo cargar: ' + error.message;}
+    } catch(error) {
+      retryCount++;
+      if (retryCount <= 3) {
+        message.textContent = 'La carga ha tardado demasiado. Reintentando (' + retryCount + '/3)…';
+        retryTimer = setTimeout(() => loadConfig(), 1000 * retryCount);
+      } else {
+        message.textContent = 'No se pudo cargar: ' + error.message + '. Pulsa «Recargar configuración» para volver a intentarlo.';
+      }
+    }
     finally {lock(false);}
   }
-  load.addEventListener('click', loadConfig);
+  load.addEventListener('click', () => loadConfig(true));
   if (page !== 'all') loadConfig();
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (busy || !controls) return;

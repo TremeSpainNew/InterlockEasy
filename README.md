@@ -153,13 +153,15 @@ no sustituyen la validación del W5500 y los relés en la placa.
 
 ## Configuración desde el navegador
 
-La navegación se divide en cinco páginas:
+La navegación se divide en siete páginas:
 
 - `/index.html`: resumen de conexiones, entradas, salidas y señales.
 - `/mqtt.html`: broker y credenciales.
 - `/inputs.html`: configuración de las entradas, JSON, inversión y antirrebote.
 - `/outputs.html`: configuración de salidas independientes.
 - `/signals.html`: focos, relés, aspectos y parpadeo.
+- `/detection.html`: circuitos de vía lineales y contadores de ejes.
+- `/hardware.html`: red, mapa de canales y expansores.
 
 Cada página de configuración carga sus ajustes automáticamente y permite
 **Recargar configuración**. Al guardar se consulta la configuración actual y se
@@ -182,6 +184,10 @@ un canal deshabilita su uso por MQTT, no fuerza su salida a OFF.
 - Entradas: habilitación MQTT, nombre, topic, payloads ON/OFF, inversión y retain.
 - Salidas: habilitación MQTT, nombre, topic y payloads de mando, publicación
   de estado, topic/payloads de estado y retain.
+- Detección: un CV lineal ocupa una entrada y publica Libre/Ocupado. Un cuenta
+  ejes usa dos entradas; el primer extremo fija el sentido, los pulsos del mismo
+  extremo suman y los del contrario restan. Al arrancar queda ocupado y pendiente
+  de puesta a cero desde el resumen para evitar una indicación libre falsa.
 - Límites en bytes: nombre y Client ID 64; host, usuario, contraseña y
   topics 128; payloads 256. En payloads se permiten saltos de línea y tabuladores.
   Se rechazan los demás caracteres de control, comodines en topics,

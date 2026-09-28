@@ -6,6 +6,9 @@
     "sda": 42,
     "scl": 41
   },
+  "network": {
+    "type": "ethernet"
+  },
   "ethernet": {
     "type": "w5500",
     "sclk": 15,

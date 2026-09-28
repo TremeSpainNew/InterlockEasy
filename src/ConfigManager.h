@@ -44,6 +44,20 @@ struct MQTTConfig {
     uint16_t keepAlive = 30;
 };
 
+enum class TrackSectionType { LINEAR, AXLE_COUNTER };
+struct TrackSectionConfig {
+    bool enabled = false;
+    TrackSectionType type = TrackSectionType::LINEAR;
+    String name;
+    uint8_t inputA = 1;
+    uint8_t inputB = 2;
+    String stateTopic;
+    String countTopic;
+    String payloadOccupied = "{\"Estado\":\"Ocupado\"}";
+    String payloadFree = "{\"Estado\":\"Libre\"}";
+    bool retain = true;
+};
+
 struct SignalLight {
     String name;
     uint8_t relay = 1; // Logical RO number, 1..32.
@@ -72,6 +86,7 @@ class ConfigManager {
 public:
     MQTTConfig mqtt;
     std::vector<SignalConfig> signals;
+    std::vector<TrackSectionConfig> trackSections;
     bool relayAssigned(uint8_t channel) const;
     std::vector<InputConfig> inputs = std::vector<InputConfig>(8);
     std::vector<OutputConfig> outputs = std::vector<OutputConfig>(8);

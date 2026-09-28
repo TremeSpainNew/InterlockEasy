@@ -50,7 +50,9 @@
     try {
       const result = JSON.parse(await request({method:'POST', headers:{'Content-Type':'application/json','X-Interlock':'1'}, body}));
       if (result.saved !== true) throw new Error('Respuesta inesperada');
-      message.textContent = 'Guardado. Reinicia el módulo para aplicar el hardware. La configuración activa no ha cambiado.';
+      message.textContent = result.restarting
+        ? 'Guardado. Reiniciando el módulo para aplicar la configuración…'
+        : 'Guardado. Reinicia el módulo para aplicar la configuración.';
     } catch(error) {message.textContent = 'No se pudo confirmar el guardado: ' + error.message + '. Conserva tu copia y recarga el archivo para comprobarlo.';}
     finally {lock(false);}
   };

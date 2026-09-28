@@ -46,6 +46,12 @@ int main(int argc,char** argv){
  DynamicJsonDocument doc(24576);assert(!deserializeJson(doc,text.str()));String error;
  assert(Hardware.parse(doc.as<JsonVariantConst>(),error));
  assert(Hardware.inputs.size()==8 && Hardware.outputs.size()==8);
+ doc["network"]["type"]="wifi";doc["network"]["ssid"]="TestNet";
+ doc["network"]["password"]="secret";doc["network"]["hostname"]="Interlock-Test";
+ assert(Hardware.parse(doc.as<JsonVariantConst>(),error));
+ assert(Hardware.networkType==NetworkType::WIFI && Hardware.wifiSsid=="TestNet");
+ doc["network"]["ssid"]="";assert(!Hardware.parse(doc.as<JsonVariantConst>(),error));
+ doc["network"]["ssid"]="TestNet";assert(Hardware.parse(doc.as<JsonVariantConst>(),error));
  doc["outputs"][0]["module"]=0;doc["outputs"][0]["pin"]=4;
  assert(!Hardware.parse(doc.as<JsonVariantConst>(),error)); // duplicate physical input/output
  doc["outputs"][0]["module"]=1;doc["outputs"][0]["pin"]=0;

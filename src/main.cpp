@@ -6,6 +6,7 @@
 #include "WebManager.h"
 #include "SignalManager.h"
 #include "HardwareConfig.h"
+#include "DetectionManager.h"
 
 static bool hardwareValid = false;
 
@@ -25,9 +26,10 @@ void setup() {
     Serial.printf("Hardware: %u entradas, %u reles, %u modulos.\n", unsigned(Hardware.inputs.size()), unsigned(Hardware.outputs.size()), unsigned(Hardware.modules.size()));
     Config.begin();
     IO.begin();
+    Detections.reload();
 
-    while (!Network.begin()) {
-        Serial.println("Ethernet/DHCP no disponible. Reintentando...");
+    while (!Connectivity.begin()) {
+        Serial.println("Red no disponible. Reintentando...");
         delay(5000);
     }
 
@@ -35,13 +37,14 @@ void setup() {
     Web.begin();
 
     Serial.print("Sistema iniciado en ");
-    Serial.println(Network.ip());
+    Serial.println(Connectivity.ip());
 }
 
 void loop() {
     if (!hardwareValid) {delay(100); return;}
     IO.loop();
-    Network.loop();
+    Detections.loop();
+    Connectivity.loop();
     MQTT.loop();
     IO.loop();
     Signals.loop();

@@ -20,6 +20,7 @@ void ConfigManager::begin() {
             toJson(resized,true);
             resized["mqtt"].set(doc["mqtt"]);
             if (doc.containsKey("signals")) resized["signals"].set(doc["signals"]);
+            if (doc.containsKey("trackSections")) resized["trackSections"].set(doc["trackSections"]);
             for (const char* key : {"inputs","outputs"}) {
                 const size_t count = key[0]=='i' ? inputs.size() : outputs.size();
                 for (size_t i=0;i<count && i<doc[key].size();++i) resized[key][i].set(doc[key][i]);
@@ -30,6 +31,13 @@ void ConfigManager::begin() {
                 for (JsonObject light:list[i-1]["lights"].as<JsonArray>())
                     if(light["relay"].as<unsigned int>()>outputs.size())removed=true;
                 if(removed)list.remove(i-1);
+            }
+            JsonArray tracks=resized["trackSections"].as<JsonArray>();
+            for (size_t i=tracks.size();i>0;--i) {
+                JsonObject section=tracks[i-1];
+                const bool axle=String(section["type"] | "linear") == "axleCounter";
+                if (section["inputA"].as<unsigned int>() > inputs.size() ||
+                    (axle && section["inputB"].as<unsigned int>() > inputs.size())) tracks.remove(i-1);
             }
             if (resized.overflowed() || !applyJson(resized.as<JsonVariantConst>(), error, false)) {
                 Serial.println("ERROR: no se pudo adaptar la configuracion NVS."); return;
@@ -140,6 +148,21 @@ void ConfigManager::toJson(JsonDocument& doc, bool secrets) const {
             for (size_t i = 0; i < signal.lights.size(); ++i)
                 if (aspect.mask & (1U << i)) on.add(i + 1);
         }
+    }
+
+    JsonArray trackArray = doc.createNestedArray("trackSections");
+    for (const auto& section : trackSections) {
+        JsonObject item = trackArray.createNestedObject();
+        item["enabled"] = section.enabled;
+        item["type"] = section.type == TrackSectionType::AXLE_COUNTER ? "axleCounter" : "linear";
+        item["name"] = section.name;
+        item["inputA"] = section.inputA;
+        item["inputB"] = section.inputB;
+        item["stateTopic"] = section.stateTopic;
+        item["countTopic"] = section.countTopic;
+        item["payloadOccupied"] = section.payloadOccupied;
+        item["payloadFree"] = section.payloadFree;
+        item["retain"] = section.retain;
     }
 
 }
@@ -363,6 +386,66 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
             nextSignals.push_back(signal);
         }
     }
+    std::vector<TrackSectionConfig> nextTracks;
+    error = "Deteccion: configuracion no valida (maximo 16 tramos y entradas exclusivas).";
+    if (!doc.containsKey("trackSections") && !trackSections.empty()) return false;
+    if (doc.containsKey("trackSections")) {
+        if (!doc["trackSections"].is<JsonArrayConst>() || doc["trackSections"].size() > 16) return false;
+        uint32_t reservedInputs = 0;
+        for (JsonObjectConst item : doc["trackSections"].as<JsonArrayConst>()) {
+            if (!item["enabled"].is<bool>() || !textField(item["type"], 16) ||
+                !textField(item["name"], 64) || !item["inputA"].is<unsigned int>() ||
+                !textField(item["stateTopic"], 128) || !textField(item["countTopic"], 128) ||
+                !textField(item["payloadOccupied"], 256, true) || !textField(item["payloadFree"], 256, true) ||
+                !item["retain"].is<bool>()) return false;
+            TrackSectionConfig section;
+            section.enabled = item["enabled"].as<bool>();
+            const String type = item["type"].as<String>();
+            if (type == "linear") section.type = TrackSectionType::LINEAR;
+            else if (type == "axleCounter") section.type = TrackSectionType::AXLE_COUNTER;
+            else return false;
+            section.name = item["name"].as<String>();
+            section.inputA = item["inputA"].as<uint8_t>();
+            section.inputB = item["inputB"] | 0;
+            section.stateTopic = item["stateTopic"].as<String>();
+            section.countTopic = item["countTopic"].as<String>();
+            section.payloadOccupied = item["payloadOccupied"].as<String>();
+            section.payloadFree = item["payloadFree"].as<String>();
+            section.retain = item["retain"].as<bool>();
+            if (section.name.isEmpty() || section.inputA < 1 || section.inputA > inputs.size() ||
+                !topicField(section.stateTopic) || !topicField(section.countTopic) ||
+                section.payloadOccupied == section.payloadFree || section.payloadOccupied.isEmpty() || section.payloadFree.isEmpty()) return false;
+            if (section.type == TrackSectionType::AXLE_COUNTER &&
+                (!item["inputB"].is<unsigned int>() || section.inputB < 1 || section.inputB > inputs.size() || section.inputB == section.inputA)) return false;
+            if (section.enabled) {
+                if (section.stateTopic.isEmpty() || (section.type == TrackSectionType::AXLE_COUNTER && section.countTopic.isEmpty())) return false;
+                uint32_t mask = uint32_t(1) << (section.inputA - 1);
+                if (section.type == TrackSectionType::AXLE_COUNTER) mask |= uint32_t(1) << (section.inputB - 1);
+                if (mask & reservedInputs) { error = "Dos tramos habilitados no pueden compartir entradas."; return false; }
+                reservedInputs |= mask;
+            }
+            nextTracks.push_back(section);
+        }
+    }
+    for (const auto& section : nextTracks) {
+        if (!section.enabled) continue;
+        for (const auto& output : nextOutputs) {
+            if (!output.enabled) continue;
+            if (output.commandTopic == section.stateTopic ||
+                (section.type == TrackSectionType::AXLE_COUNTER && output.commandTopic == section.countTopic)) {
+                error = "Un topic de deteccion coincide con un topic de mando de rele.";
+                return false;
+            }
+        }
+        for (const auto& signal : nextSignals) {
+            if (!signal.enabled) continue;
+            if (signal.topic == section.stateTopic ||
+                (section.type == TrackSectionType::AXLE_COUNTER && signal.topic == section.countTopic)) {
+                error = "Un topic de deteccion coincide con un topic de mando de senal.";
+                return false;
+            }
+        }
+    }
     // Persist a complete snapshot before changing the live configuration.
     if (persist) {
         DynamicJsonDocument saved(65536);
@@ -378,6 +461,7 @@ bool ConfigManager::applyJson(JsonVariantConst doc, String& error, bool persist)
         }
     }
     signals = std::move(nextSignals);
+    trackSections = std::move(nextTracks);
     mqtt = nextMqtt;
     inputs = std::move(nextInputs); outputs = std::move(nextOutputs);
     error = "";

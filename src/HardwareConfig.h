@@ -4,10 +4,15 @@
 #include <vector>
 
 enum class ModuleType { GPIO, TCA9554, PCF8574, PCF8575, MCP23017 };
+enum class NetworkType { ETHERNET, WIFI };
 struct HardwareModule { ModuleType type; uint8_t address; };
 struct HardwareChannel { uint8_t module, pin; bool activeLow = false; bool pullup = true; };
 class HardwareConfig {
 public:
+    NetworkType networkType = NetworkType::ETHERNET;
+    String wifiSsid;
+    String wifiPassword;
+    String hostname = "InterlockEasy";
     int sda = 42, scl = 41;
     int sclk = 15, miso = 14, mosi = 13, cs = 16;
     std::vector<HardwareModule> modules;

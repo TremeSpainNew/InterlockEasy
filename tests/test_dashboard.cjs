@@ -4,9 +4,9 @@ const vm = require('node:vm');
 const path = require('node:path');
 const script = fs.readFileSync(path.join(__dirname, '../data/dashboard.js'), 'utf8');
 const element = () => ({textContent: '', className: '', children: [], replaceChildren() {this.children=[];}, append(...children) {this.children.push(...children);}});
-const elements = Object.fromEntries(['inputs', 'outputs', 'ip', 'ethernet', 'mqtt', 'relays', 'connection', 'updated'].map(id => [id, element()]));
+const elements = Object.fromEntries(['inputs', 'outputs', 'track-sections', 'ip', 'ethernet', 'mqtt', 'relays', 'connection', 'updated'].map(id => [id, element()]));
 const channels = Array.from({length: 8}, (_, i) => ({channel: i + 1, name: '', enabled: false, state: false}));
-const data = {inputs: structuredClone(channels), outputs: structuredClone(channels), ethernet: {connected: true, ip: '192.168.1.50'}, mqtt: {connected: false, configured: false}, outputsReady: true};
+const data = {inputs: structuredClone(channels), outputs: structuredClone(channels), trackSections:[{channel:1,name:'CE vía 1',enabled:true,type:'axleCounter',inputA:1,inputB:2,occupied:true,uncertain:true,count:0,direction:''}], ethernet: {connected: true, ip: '192.168.1.50'}, mqtt: {connected: false, configured: false}, outputsReady: true};
 data.inputs[0].name = '<img src=x onerror=alert(1)>';
 data.inputs[0].state = true;
 Object.assign(data.inputs[0], {raw:false, debounceMs:50, filtering:true, publishPending:true});
@@ -35,6 +35,8 @@ async function next() {
   await flush();
   assert.equal(elements.inputs.children.length, 8);
   assert.equal(elements.outputs.children.length, 8);
+  assert.equal(elements['track-sections'].children.length, 1);
+  assert.match(elements['track-sections'].children[0].children[3].textContent,/puesta a cero/);
   assert.equal(elements.inputs.children[0].children[1].textContent, data.inputs[0].name);
   assert.equal(elements.inputs.children[0].children[2].textContent, 'Activa');
   assert.equal(elements.outputs.children[7].children[2].textContent, 'ON');
@@ -46,10 +48,12 @@ async function next() {
   await elements.inputs.children[0].children[5].children[0].onclick();
   await elements.inputs.children[0].children[5].children[2].onclick();
   await elements.outputs.children[7].children[5].children[0].onclick();
+  await elements['track-sections'].children[0].children[4].children[0].onclick();
   assert.deepEqual(commands.map(c => JSON.parse(c.options.body)), [
     {type:'input', channel:1, state:true},
     {type:'input', channel:1, state:null},
-    {type:'relay', channel:8, state:true}
+    {type:'relay', channel:8, state:true},
+    {type:'trackReset', channel:1}
   ]);
   assert.ok(commands.every(c => c.options.method === 'POST' && c.options.headers['X-Interlock'] === '1'));
   failure = true;

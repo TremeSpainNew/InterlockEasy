@@ -13,6 +13,7 @@ public:
     bool inputPending(uint8_t channel) const;
     void publishInput(uint8_t channel, bool state);
     void publishOutput(uint8_t channel, bool state);
+    bool publishValue(const String& topic, const String& payload, bool retain);
 
 private:
     InputStateQueue inputQueue;

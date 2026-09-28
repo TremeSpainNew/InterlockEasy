@@ -96,6 +96,22 @@ async function refreshStatus() {
     if (byId('output-count')) byId('output-count').textContent = data.outputs.length + ' canales';
     render(inputs, data.inputs, 'Entrada', 'Activa', 'Inactiva');
     render(outputs, data.outputs, 'Relé', 'ON', 'OFF', data.outputsReady);
+    const trackArea = byId('track-sections');
+    if (trackArea) {
+      trackArea.replaceChildren();
+      for (const track of data.trackSections || []) {
+        const card=document.createElement('div'); card.className='card';
+        const badge=document.createElement('span'); badge.className='badge'; badge.textContent=track.type==='axleCounter'?'CE':'CV';
+        const title=document.createElement('b'); title.textContent=track.name;
+        const state=document.createElement('p'); state.className='state'+(track.occupied?' active':''); state.textContent=!track.enabled?'Deshabilitado':track.occupied?'Ocupado':'Libre';
+        const detail=document.createElement('p'); detail.className='muted';
+        detail.textContent=track.type==='axleCounter'?(track.uncertain?'Requiere puesta a cero':'Ejes: '+track.count+(track.direction?' · entrada '+track.direction:'')):'Entrada DI'+track.inputA;
+        card.append(badge,title,state,detail);
+        if (track.type==='axleCounter') { const actions=document.createElement('div'); actions.className='test-controls'; const button=testButton('Puesta a cero',{type:'trackReset',channel:track.channel}); button.disabled=!track.enabled||testBusy; actions.append(button); card.append(actions); }
+        trackArea.append(card);
+      }
+      if (!(data.trackSections || []).length) trackArea.textContent='Sin tramos configurados.';
+    }
     const signalArea = byId('signals');
     if (signalArea) {
       signalArea.replaceChildren();
@@ -119,7 +135,7 @@ async function refreshStatus() {
       if (!(data.signals || []).length) signalArea.textContent = 'Sin señales configuradas.';
     }
     byId('ip').textContent = data.ethernet.ip;
-    byId('ethernet').textContent = data.ethernet.connected ? 'Conectado' : 'Desconectado';
+    byId('ethernet').textContent = (data.network?.type === 'wifi' ? 'Wi‑Fi · ' : 'Ethernet · ') + (data.ethernet.connected ? 'Conectado' : 'Desconectado');
     byId('mqtt').textContent = data.mqtt.connected ? 'Conectado' : data.mqtt.configured ? 'Desconectado' : 'Sin configurar';
     byId('relays').textContent = data.outputsReady ? 'Controlador inicializado' : 'No disponible';
     byId('connection').className = 'note online';
@@ -136,6 +152,7 @@ async function refreshStatus() {
       card.diagnostic.textContent = '';
     }
     if (byId('signals')) byId('signals').textContent = 'Sin datos de señales';
+    if (byId('track-sections')) byId('track-sections').textContent = 'Sin datos de detección';
     for (const id of ['ip', 'ethernet', 'mqtt', 'relays']) byId(id).textContent = '—';
   } finally {
     clearTimeout(timeout);

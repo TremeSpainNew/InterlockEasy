@@ -4,7 +4,7 @@ const elements=Object.fromEntries(ids.map(id=>[id,{value:'',disabled:false,textC
 let fail=false,posts=[];
 const context=vm.createContext({document:{getElementById:id=>elements[id]},AbortController,TextEncoder,confirm:()=>true,setTimeout:()=>1,clearTimeout:()=>{},fetch:async(url,options)=>{
  assert.equal(url,'/api/hardware');
- if(options.method==='POST'){posts.push(options);return {ok:!fail,text:async()=>fail?'Mapa no válido':'{"saved":true,"restartRequired":true}'};}
+ if(options.method==='POST'){posts.push(options);return {ok:!fail,text:async()=>fail?'Mapa no válido':'{"saved":true,"restarting":true}'};}
  return {ok:true,text:async()=>'{"version":1}'};
 }});
 (async()=>{

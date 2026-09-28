@@ -20,13 +20,15 @@ Socket idle,ready;
 struct Client {
  Socket* socket=nullptr;
  operator bool()const{return socket;}
- void setConnectionTimeout(int){}
  bool connected(){return socket && socket->open;}
  int available(){return socket?socket->input.size()-socket->cursor:0;}
  int read(){return socket->input[socket->cursor++];}
  int availableForWrite(){return 512;}
  size_t write(const uint8_t* b,size_t n){socket->output.append((const char*)b,n);return n;}
 };
+struct ConnectivityStub {bool wifi(){return false;}} Connectivity;
+struct SerialStub {void println(const char*){}} Serial;
+struct EspStub {void restart(){}} ESP;
 struct Server {
  Client accept(){return {&idle};}
  Client available(){return ready.open && ready.cursor<ready.input.size()?Client{&ready}:Client{};}
@@ -39,11 +41,11 @@ struct File {
  void seek(size_t){}
 };
 struct WebManager {
- Server server;Client client;File file;
- unsigned long started=0;bool responding=false,readingBody=false,testRequest=false,hardwareRequest=false;
+ Server ethernetServer,wifiServer;Client ethernetClient,wifiClient;Client* client=nullptr;File file;
+ unsigned long started=0,restartAt=0;bool responding=false,readingBody=false,testRequest=false,hardwareRequest=false,restartPending=false;
  size_t contentLength=0,offset=0;String request,body,pending;
  int dispatched=0;
- void close(){if(client.socket)client.socket->open=false;client={};responding=false;}
+ void close(){if(client)client->socket->open=false;client=nullptr;responding=false;}
  void dispatch(){++dispatched;responding=true;pending="OK";}
  void testControl(){}void saveHardwareConfig(){}void saveConfig(){}
  void respond(int,const char*,const char*,const char*){}
