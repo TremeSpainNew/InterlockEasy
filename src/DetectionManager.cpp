@@ -48,7 +48,7 @@ void DetectionManager::publishCv(uint8_t i) {
     const auto& state=cvStates[i];
     if (!cfg.enabled || !state.valid) return;
     MQTT.publishValue(cfg.topic(),
-        state.occupied?"{\"estado\":\"OCUPADO\"}":"{\"estado\":\"LIBRE\"}", true);
+        state.occupied?"{\"Estado\":\"Ocupado\"}":"{\"Estado\":\"Libre\"}", true);
 }
 
 void DetectionManager::processCv(uint8_t i) {

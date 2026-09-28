@@ -184,7 +184,7 @@ un canal deshabilita su uso por MQTT, no fuerza su salida a OFF.
 - Entradas: habilitación MQTT, nombre, topic, payloads ON/OFF, inversión y retain.
 - Salidas: habilitación MQTT, nombre, topic y payloads de mando, publicación
   de estado, topic/payloads de estado y retain.
-- Detección: un CV lineal ocupa una entrada y publica Libre/Ocupado. Un cuenta
+- Detección: un CV lineal ocupa una entrada y publica `{"Estado":"Libre"}` o `{"Estado":"Ocupado"}`. Un cuenta
   ejes usa dos entradas; el primer extremo fija el sentido, los pulsos del mismo
   extremo suman y los del contrario restan. Al arrancar queda ocupado y pendiente
   de puesta a cero desde el resumen para evitar una indicación libre falsa.

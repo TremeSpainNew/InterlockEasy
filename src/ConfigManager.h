@@ -87,8 +87,8 @@ struct MQTTConfig {
 //   cv/<station>/<id>/field_state
 //
 // Payload:
-//   {"estado":"LIBRE"}
-//   {"estado":"OCUPADO"}
+//   {"Estado":"Libre"}
+//   {"Estado":"Ocupado"}
 //
 // El CV tradicional representa un estado.
 // ============================================================
