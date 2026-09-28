@@ -14,6 +14,7 @@ struct TurnoutState {
 class TurnoutManager {
 public:
     void reload();
+    void stop(const String& topic = "");
     void loop();
     bool command(const String& topic, const String& payload);
     void publishAllFeedback();

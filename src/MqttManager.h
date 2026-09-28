@@ -16,6 +16,10 @@ public:
     bool publishValue(const String& topic, const String& payload, bool retain);
 
 private:
+    bool managerAvailable = true;
+    bool wasConnected = false;
+    bool registerTopics();
+    void safeOutputs();
     InputStateQueue inputQueue;
     void flushInput();
     PubSubClient* mqtt = nullptr;

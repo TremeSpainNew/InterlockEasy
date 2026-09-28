@@ -60,3 +60,12 @@ bool SignalManager::testAspect(uint8_t index, const String& value) {
     }
     return false;
 }
+
+void SignalManager::disconnected(const String& topic){
+    for(size_t i=0;i<Config.signals.size();++i){
+        const auto& signal=Config.signals[i];
+        if(!signal.enabled||signal.topic!=topic)continue;
+        active[i]=-1;
+        IO.setOutputs(signal.relayMask(),0);
+    }
+}

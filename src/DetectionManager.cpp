@@ -67,7 +67,8 @@ void DetectionManager::processCv(uint8_t i) {
 void DetectionManager::publishAxleEvent(uint8_t i,const String& payload) {
     if (i>=Config.axleCounters.size() || i>=axleStates.size()) return;
     if (!Config.axleCounters[i].enabled) return;
-    if (MQTT.publishValue(Config.axleCounters[i].topic(),payload,false))
+    const String encoded="\""+payload+"\"";
+    if (MQTT.publishValue(Config.axleCounters[i].topic(),encoded,false))
         axleStates[i].lastEvent=payload;
 }
 

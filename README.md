@@ -375,3 +375,29 @@ Pruebas: `python3 tests/test_signals.py`, `python3 tests/test_config.py` y
 - DHCP / IP estática
 - Prueba de conexión MQTT
 - Importación/exportación de configuración
+
+
+### Gestión de conexión con Enclavamiento
+
+Se aplica la gestión de conexión de
+https://github.com/cesarBLG/Enclavamiento/blob/master/doc/mqtt_protocol.md:
+
+- La conexión no envía usuario ni contraseña, aunque la configuración antigua los conserve.
+- Cada módulo necesita un Client ID único. Su last will publica ese ID en
+  `desconexion` (QoS 1, sin retain).
+- Al conectar, publica en `desconexion/<clientId>` la lista de topics que proporciona,
+  separados por saltos de línea y con retain, antes de publicar los estados.
+- Se suscribe a `gestor_conexion`: `off` desactiva las salidas y bloquea los mandos
+  MQTT hasta recibir `on`. La reconexión por sí sola no elimina ese bloqueo.
+- La pérdida de conexión desactiva los relés y cancela impulsos y parpadeos.
+  Un mensaje JSON `"desconexion"` en un topic de mando desactiva sus salidas.
+  La política local es desenergizar: las señales quedan apagadas. El protocolo
+  no especifica qué aspecto físico corresponde al estado seguro de cada instalación.
+- Los eventos CE se transmiten como cadenas JSON: `"Nominal:1"`, `"Reverse:1"`,
+  `"Error"` y `"conexion"`, sin retain.
+
+La adaptación mantiene el topic de entrada de detección existente
+`cv/<estacion>/<id>/field_state` por compatibilidad con la configuración
+actual; la referencia enumera `cv/<estacion>/<id>/state`.
+La resolución del broker sigue dependiendo del transporte de red existente
+(IP y DNS); no se ha añadido un resolvedor mDNS para W5500.

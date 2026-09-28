@@ -123,3 +123,11 @@ void TurnoutManager::loop(){
         }
     }
 }
+
+void TurnoutManager::stop(const String& topic){
+    for(uint8_t i=0;i<states.size();++i){
+        if(!Config.turnouts[i].enabled||(!topic.isEmpty()&&Config.turnouts[i].commandTopic()!=topic))continue;
+        stopPulse(i);
+        states[i].commanded=-1;
+    }
+}

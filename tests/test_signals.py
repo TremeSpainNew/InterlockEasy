@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 scope = {'__file__': str(ROOT/'tests/test_config.py')}
 exec((ROOT/'tests/test_config.py').read_text().split('TEST =')[0], scope)
 stubs = scope['STUBS'].copy()
-stubs['Arduino.h'] = stubs['Arduino.h'].replace('void println(const char*) {}', 'void println(const char*) {} template<class... T> void printf(const char*, T...) {}') + '''
+stubs['Arduino.h'] = stubs['Arduino.h'].replace('void println(const char*) {}', 'void println(const char*) {} template<class T> void println(const T&) {} template<class T> void print(const T&) {} template<class... T> void printf(const char*, T...) {}') + '''
 using byte = uint8_t;
 inline unsigned long clockMs = 0;
 inline unsigned long millis() {return clockMs;}
@@ -90,6 +90,9 @@ int main() {
  IO.begin();assert(Signals.testAspect(0,"ViaLibre"));assert(IO.getOutput(31) && !IO.getOutput(2));
  IO.setOutput(31,false);assert(IO.getOutput(31)); // High relay bit is also reserved.
  assert(Signals.testAspect(0,"Parada"));assert(!IO.getOutput(31) && IO.getOutput(0));
+ Signals.disconnected("other");assert(IO.getOutput(0));
+ Signals.disconnected("s1");assert(!IO.getOutput(0) && Signals.aspect(0).isEmpty());
+ clockMs+=1000;Signals.loop();assert(!IO.getOutput(0));
 }
 '''
 with tempfile.TemporaryDirectory(prefix='interlock-signals-') as directory:

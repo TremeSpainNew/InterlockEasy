@@ -5,6 +5,7 @@ class SignalManager {
 public:
     SignalManager();
     void reload();
+    void disconnected(const String& topic);
     void loop();
     bool testAspect(uint8_t signal, const String& value);
     void command(const String& topic, const String& payload);

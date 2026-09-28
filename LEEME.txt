@@ -54,7 +54,7 @@ FUNCIONAMIENTO
 
 CV:
   cv/<estacion>/<id>/field_state
-  {"estado":"LIBRE"} / {"estado":"OCUPADO"}
+  {"estado":"Libre"} / {"estado":"Ocupado"}
 
 CE:
   cejes/<estacion>/<id>/event
