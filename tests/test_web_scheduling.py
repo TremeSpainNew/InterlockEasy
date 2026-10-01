@@ -17,20 +17,21 @@ struct String:std::string {
 };
 struct Socket {bool open=true;String input;size_t cursor=0;String output;};
 Socket idle,ready;
+bool wifiMode=false;
 struct Client {
  Socket* socket=nullptr;
  operator bool()const{return socket;}
  bool connected(){return socket && socket->open;}
  int available(){return socket?socket->input.size()-socket->cursor:0;}
  int read(){return socket->input[socket->cursor++];}
- int availableForWrite(){return 512;}
- size_t write(const uint8_t* b,size_t n){socket->output.append((const char*)b,n);return n;}
+ int availableForWrite(){return wifiMode?0:512;}
+ size_t write(const uint8_t* b,size_t n){if(wifiMode)n=std::min(n,size_t(1));socket->output.append((const char*)b,n);return n;}
 };
-struct ConnectivityStub {bool wifi(){return false;}} Connectivity;
+struct ConnectivityStub {bool wifi(){return wifiMode;}} Connectivity;
 struct SerialStub {void println(const char*){}} Serial;
 struct EspStub {void restart(){}} ESP;
 struct Server {
- Client accept(){return {&idle};}
+ Client accept(){return available();}
  Client available(){return ready.open && ready.cursor<ready.input.size()?Client{&ready}:Client{};}
 };
 struct File {
@@ -60,6 +61,13 @@ int main(){
  web.loop();web.loop();assert(ready.output=="OK" && !ready.open);
  // No request queued: do not occupy the sole worker with the idle socket.
  web.loop();assert(!web.client);
+ // WiFi reports zero writable capacity despite accepting writes. Also exercise
+ // short writes so neither response byte is dropped or duplicated.
+ wifiMode=true;ready.open=true;ready.cursor=0;ready.output.clear();
+ WebManager wireless;
+ wireless.loop();assert(wireless.dispatched==1);
+ wireless.loop();assert(ready.output=="OK" && !ready.open);
+
 }
 '''
 with tempfile.TemporaryDirectory() as folder:

@@ -15,17 +15,19 @@ public:
  bool isEmpty() const { return empty(); }
  int indexOf(char c) const { auto p=find(c); return p==npos ? -1 : int(p); }
 };
-struct SerialStub { void println(const char*) {} };
+struct SerialStub { void println(const char*) {} template<class T> void println(const T&) {} template<class T> void print(const T&) {} };
 inline SerialStub Serial;
 ''',
 'Preferences.h': r'''#pragma once
 #include <map>
+#include <cassert>
 inline std::map<std::string, String> storage;
 inline bool failWrite = false;
 class Preferences {
 public:
  bool begin(const char*, bool) {return true;}
- String getString(const char* key, const char* fallback) {return storage.count(key) ? storage[key] : String(fallback);}
+ bool isKey(const char* key) {return storage.count(key) != 0;}
+ String getString(const char* key, const char* fallback) {assert(isKey(key)); return storage[key];}
  uint16_t getUShort(const char*, uint16_t fallback) {return fallback;}
  bool getBool(const char*, bool fallback) {return fallback;}
  size_t putString(const char* key, const String& value) {if(failWrite) return 0; storage[key]=value; return value.length();}

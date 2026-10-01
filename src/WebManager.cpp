@@ -173,7 +173,10 @@ void WebManager::loop(){
     }
     size_t sendBudget=4096;
     while(sendBudget>0&&client&&*client){
-        const int available=client->availableForWrite();if(available<=0)return;size_t capacity=static_cast<size_t>(available);if(capacity>512)capacity=512;if(capacity>sendBudget)capacity=sendBudget;
+        // ESP32 NetworkClient inherits Print::availableForWrite(), which returns
+        // zero even on a writable WiFi socket. Write bounded chunks directly;
+        // preserve offsets when write() accepts only part of a chunk.
+        const int available=Connectivity.wifi()?512:client->availableForWrite();if(available<=0)return;size_t capacity=static_cast<size_t>(available);if(capacity>512)capacity=512;if(capacity>sendBudget)capacity=sendBudget;
         if(offset<pending.length()){const size_t remaining=pending.length()-offset,wanted=remaining<capacity?remaining:capacity;const size_t sent=client->write(reinterpret_cast<const uint8_t*>(pending.c_str())+offset,wanted);if(!sent)return;offset+=sent;sendBudget-=sent;continue;}
         if(file&&file.available()){uint8_t buffer[512];const size_t position=file.position(),count=file.read(buffer,capacity);if(!count){close();return;}const size_t sent=client->write(buffer,count);if(sent<count)file.seek(position+sent);if(!sent)return;sendBudget-=sent;continue;}
         close();return;

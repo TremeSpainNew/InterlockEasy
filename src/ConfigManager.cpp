@@ -47,6 +47,12 @@ String axleTopic(const AxleCounterConfig& counter) {
     return "cejes/" + counter.station + "/" + counter.id + "/event";
 }
 
+// Missing legacy keys are normal on a new device or with JSON-only storage.
+// Preferences::getString logs NOT_FOUND even when a fallback is provided.
+String optionalString(Preferences& prefs, const char* key, const char* fallback) {
+    return prefs.isKey(key) ? prefs.getString(key, fallback) : String(fallback);
+}
+
 } // namespace
 
 
@@ -56,7 +62,7 @@ void ConfigManager::begin() {
     // Carga las antiguas claves individuales como valores base.
     load();
 
-    String stored = prefs.getString("config_v1", "");
+    String stored = optionalString(prefs, "config_v1", "");
     if (stored.isEmpty()) return;
 
     DynamicJsonDocument doc(65536);
@@ -195,19 +201,19 @@ void ConfigManager::begin() {
 
 void ConfigManager::load() {
     mqtt.host =
-        prefs.getString("mqtt_host", "");
+        optionalString(prefs, "mqtt_host", "");
 
     mqtt.port =
         prefs.getUShort("mqtt_port", 1883);
 
     mqtt.clientId =
-        prefs.getString("mqtt_client", "InterlockEasy-IO");
+        optionalString(prefs, "mqtt_client", "InterlockEasy-IO");
 
     mqtt.username =
-        prefs.getString("mqtt_user", "");
+        optionalString(prefs, "mqtt_user", "");
 
     mqtt.password =
-        prefs.getString("mqtt_pass", "");
+        optionalString(prefs, "mqtt_pass", "");
 
     mqtt.keepAlive =
         prefs.getUShort("mqtt_keep", 30);
@@ -220,16 +226,16 @@ void ConfigManager::load() {
             prefs.getBool((p + "e").c_str(), false);
 
         inputs[i].name =
-            prefs.getString((p + "n").c_str(), "");
+            optionalString(prefs, (p + "n").c_str(), "");
 
         inputs[i].topic =
-            prefs.getString((p + "t").c_str(), "");
+            optionalString(prefs, (p + "t").c_str(), "");
 
         inputs[i].payloadOn =
-            prefs.getString((p + "on").c_str(), "1");
+            optionalString(prefs, (p + "on").c_str(), "1");
 
         inputs[i].payloadOff =
-            prefs.getString((p + "off").c_str(), "0");
+            optionalString(prefs, (p + "off").c_str(), "0");
 
         inputs[i].inverted =
             prefs.getBool((p + "inv").c_str(), true);
@@ -246,28 +252,28 @@ void ConfigManager::load() {
             prefs.getBool((p + "e").c_str(), false);
 
         outputs[i].name =
-            prefs.getString((p + "n").c_str(), "");
+            optionalString(prefs, (p + "n").c_str(), "");
 
         outputs[i].commandTopic =
-            prefs.getString((p + "ct").c_str(), "");
+            optionalString(prefs, (p + "ct").c_str(), "");
 
         outputs[i].payloadOn =
-            prefs.getString((p + "on").c_str(), "1");
+            optionalString(prefs, (p + "on").c_str(), "1");
 
         outputs[i].payloadOff =
-            prefs.getString((p + "off").c_str(), "0");
+            optionalString(prefs, (p + "off").c_str(), "0");
 
         outputs[i].publishState =
             prefs.getBool((p + "ps").c_str(), true);
 
         outputs[i].stateTopic =
-            prefs.getString((p + "st").c_str(), "");
+            optionalString(prefs, (p + "st").c_str(), "");
 
         outputs[i].stateOn =
-            prefs.getString((p + "son").c_str(), "1");
+            optionalString(prefs, (p + "son").c_str(), "1");
 
         outputs[i].stateOff =
-            prefs.getString((p + "sof").c_str(), "0");
+            optionalString(prefs, (p + "sof").c_str(), "0");
 
         outputs[i].retain =
             prefs.getBool((p + "ret").c_str(), true);
