@@ -21,14 +21,15 @@ void TurnoutManager::drive(uint8_t index,uint8_t position){
     if(index>=Config.turnouts.size()||index>=states.size())return;
     const auto& c=Config.turnouts[index];
     auto& s=states[index];
-    const uint32_t n=uint32_t(1)<<(c.outputNormal-1);
-    const uint32_t r=uint32_t(1)<<(c.outputReverse-1);
-    const uint32_t mask=n|r;
-    const uint32_t selected=position==0?n:r;
+    const uint64_t n=uint64_t(1)<<(c.outputNormal-1);
+    const uint64_t r=uint64_t(1)<<(c.outputReverse-1);
+    const uint64_t mask=n|r;
+    const uint64_t selected=position==0?n:r;
 
     // Nunca se energizan simultaneamente las dos salidas.
-    IO.setOutputs(mask,selected);
     s.commanded=position;
+    s.drivePending=!IO.setOutputs(mask,selected);
+    if(s.drivePending){s.pulseActive=false;return;}
 
     if(c.drive==TurnoutDrive::PULSE){
         s.pulseActive=true;
@@ -41,8 +42,9 @@ void TurnoutManager::drive(uint8_t index,uint8_t position){
 void TurnoutManager::stopPulse(uint8_t index){
     if(index>=Config.turnouts.size()||index>=states.size())return;
     const auto& c=Config.turnouts[index];
-    const uint32_t mask=(uint32_t(1)<<(c.outputNormal-1))|(uint32_t(1)<<(c.outputReverse-1));
+    const uint64_t mask=(uint64_t(1)<<(c.outputNormal-1))|(uint64_t(1)<<(c.outputReverse-1));
     IO.setOutputs(mask,0);
+    states[index].drivePending=false;
     states[index].pulseActive=false;
 }
 
@@ -116,6 +118,7 @@ void TurnoutManager::loop(){
         if(!Config.turnouts[i].enabled)continue;
         auto& s=states[i];
         publishFeedback(i,false);
+        if(s.drivePending)drive(i,s.commanded);
         if(s.pulseActive){
             const int8_t feedback=readFeedback(i);
             if((feedback==s.commanded) || (long)(now-s.pulseUntil)>=0)

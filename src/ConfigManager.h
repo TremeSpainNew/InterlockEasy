@@ -198,7 +198,7 @@ struct TurnoutConfig {
 struct SignalLight {
     String name;
 
-    // Numero logico de RO: 1..32.
+    // Numero logico de RO: 1..64.
     uint8_t relay = 1;
 };
 
@@ -230,14 +230,14 @@ struct SignalConfig {
     std::vector<SignalAspect> aspects;
 
 
-    uint32_t relayMask() const {
-        uint32_t mask = 0;
+    uint64_t relayMask() const {
+        uint64_t mask = 0;
 
         for (const auto& light : lights) {
             if (light.relay >= 1 &&
-                light.relay <= 32) {
+                light.relay <= 64) {
                 mask |=
-                    uint32_t(1)
+                    uint64_t(1)
                     << (light.relay - 1);
             }
         }

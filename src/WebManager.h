@@ -33,6 +33,9 @@ private:
 
     bool testRequest = false;
     bool hardwareRequest = false;
+    bool firmwareRequest = false;
+    size_t firmwareReceived = 0;
+    void receiveFirmware();
 
     // Reinicio automático después de guardar
     // la configuración de hardware.
@@ -57,7 +60,7 @@ private:
     );
 
     void status();
-    void config();
+    void config(bool secrets=false);
     void saveConfig();
     void testControl();
 

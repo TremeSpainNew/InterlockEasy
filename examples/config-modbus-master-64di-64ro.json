@@ -1,0 +1,707 @@
+{
+  "version": 1,
+  "inputCount": 64,
+  "outputCount": 64,
+  "network": {
+    "type": "wifi",
+    "ssid": "MiRed",
+    "password": "MiClave",
+    "hostname": "InterlockEasy-Master"
+  },
+  "i2c": {
+    "sda": 42,
+    "scl": 41
+  },
+  "modbus": {
+    "role": "master",
+    "address": 1,
+    "tx": 17,
+    "rx": 18,
+    "de": -1,
+    "baud": 38400,
+    "parity": "N",
+    "timeoutMs": 100,
+    "watchdogMs": 3000
+  },
+  "modules": [
+    {
+      "type": "gpio"
+    },
+    {
+      "type": "tca9554",
+      "address": 32
+    },
+    {
+      "type": "modbus",
+      "address": 1
+    },
+    {
+      "type": "modbus",
+      "address": 2
+    },
+    {
+      "type": "modbus",
+      "address": 3
+    },
+    {
+      "type": "modbus",
+      "address": 4
+    },
+    {
+      "type": "modbus",
+      "address": 5
+    },
+    {
+      "type": "modbus",
+      "address": 6
+    },
+    {
+      "type": "modbus",
+      "address": 7
+    }
+  ],
+  "inputs": [
+    {
+      "module": 0,
+      "pin": 4,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 5,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 6,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 7,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 8,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 9,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 10,
+      "pullup": true
+    },
+    {
+      "module": 0,
+      "pin": 11,
+      "pullup": true
+    },
+    {
+      "module": 2,
+      "pin": 0,
+      "pullup": false
+    },
+    {
+      "module": 2,
+      "pin": 1,
+      "pullup": false
+    },
+    {
+      "module": 2,
+      "pin": 2,
+      "pullup": false
+    },
+    {
+      "module": 2,
+      "pin": 3,
+      "pullup": false
+    },
+    {
+      "module": 2,
+      "pin": 4,
+      "pullup": false
+    },
+    {
+      "module": 2,
+      "pin": 5,
+      "pullup": false
+    },
+    {
+      "module": 2,
+      "pin": 6,
+      "pullup": false
+    },
+    {
+      "module": 2,
+      "pin": 7,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 0,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 1,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 2,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 3,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 4,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 5,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 6,
+      "pullup": false
+    },
+    {
+      "module": 3,
+      "pin": 7,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 0,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 1,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 2,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 3,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 4,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 5,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 6,
+      "pullup": false
+    },
+    {
+      "module": 4,
+      "pin": 7,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 0,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 1,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 2,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 3,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 4,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 5,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 6,
+      "pullup": false
+    },
+    {
+      "module": 5,
+      "pin": 7,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 0,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 1,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 2,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 3,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 4,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 5,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 6,
+      "pullup": false
+    },
+    {
+      "module": 6,
+      "pin": 7,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 0,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 1,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 2,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 3,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 4,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 5,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 6,
+      "pullup": false
+    },
+    {
+      "module": 7,
+      "pin": 7,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 0,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 1,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 2,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 3,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 4,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 5,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 6,
+      "pullup": false
+    },
+    {
+      "module": 8,
+      "pin": 7,
+      "pullup": false
+    }
+  ],
+  "outputs": [
+    {
+      "module": 1,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 1,
+      "pin": 7,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 2,
+      "pin": 7,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 3,
+      "pin": 7,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 4,
+      "pin": 7,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 5,
+      "pin": 7,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 6,
+      "pin": 7,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 7,
+      "pin": 7,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 0,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 1,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 2,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 3,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 4,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 5,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 6,
+      "activeLow": false
+    },
+    {
+      "module": 8,
+      "pin": 7,
+      "activeLow": false
+    }
+  ]
+}

@@ -124,7 +124,7 @@ la conexión MQTT y la disponibilidad del controlador de relés.
 
 La API devuelve `uptimeMs`, `ethernet` (`connected`, `ip`), `mqtt`
 (`connected`, `configured`), `filesystemReady`, `outputsReady`, `inputs`
-y `outputs`. Cada canal incluye `channel` (1..N, hasta 32), `name`, `enabled`
+y `outputs`. Cada canal incluye `channel` (1..N, hasta 64), `name`, `enabled`
 (habilitación MQTT) y `state`. Las salidas tienen `state: null` cuando
 el controlador no se ha inicializado. No se exponen credenciales.
 
@@ -175,7 +175,7 @@ separación hay que actualizar **firmware y LittleFS**. Prueba de las páginas:
 `node tests/test_pages.cjs`.
 
 Edita el broker o despliega los canales en la página correspondiente.
-**Guardar y aplicar** valida y guarda en NVS una instantánea completa antes de
+**Guardar y aplicar** valida y guarda una instantánea completa antes de
 cambiar la configuración activa. Los relés conservan su último estado; deshabilitar
 un canal deshabilita su uso por MQTT, no fuerza su salida a OFF.
 
@@ -211,8 +211,10 @@ se aplica también al estado de entradas. Los estados de salida solo se publican
 si el controlador está inicializado. Los mensajes retenidos en topics antiguos
 no se borran automáticamente al cambiar la configuración.
 
-La instantánea se guarda en la clave NVS `config_v1`; se sigue leyendo la
-configuración antigua por claves individuales cuando no existe una instantánea.
+La instantánea se guarda en `/io-config.json` cuando LittleFS está disponible.
+Si no lo está, se usa la clave NVS `config_v1` como bloque binario, con el límite
+del espacio libre de NVS. Las instantáneas antiguas como texto o bloque binario
+siguen siendo legibles cuando no hay archivo de configuración lógica.
 
 ## Payloads JSON
 
@@ -279,7 +281,7 @@ API `POST /api/test`, con JSON y `X-Interlock: 1`:
 - `{"type":"input","channel":1,"state":null}`: restaurar DI1 física.
 - `{"type":"signal","channel":1,"aspect":"VíaLibre"}`: probar el aspecto de la primera señal.
 
-Los canales de entrada y relé son 1..N (hasta 32); los índices de señal son 1..8. Una señal conserva el aspecto de prueba hasta otro mando,
+Los canales de entrada y relé son 1..N (hasta 64); los índices de señal son 1..8. Una señal conserva el aspecto de prueba hasta otro mando,
 reinicio o cambio de configuración; los relés no tienen apagado temporizado.
 La respuesta `{"applied":true}` confirma aplicación, no realimentación física.
 
@@ -324,7 +326,7 @@ independientes, inversión, reconexión, filtro desactivado y desbordamiento del
 Una señal agrupa de 1 a 8 focos, cada uno asignado a un RO físico diferente.
 En **Configuración → Señales de varios focos → Añadir señal**, define nombre,
 topic, campo JSON (`Aspecto` por defecto), focos y aspectos. Se permiten hasta
-8 señales y 12 aspectos por señal, dentro de los relés disponibles en el perfil de hardware (hasta 32).
+8 señales y 12 aspectos por señal, dentro de los relés disponibles en el perfil de hardware (hasta 64).
 
 Cada aspecto define para cada foco **Apagado**, **Fijo** o **Parpadeo**. El valor
 se escribe como texto sin comillas, respetando acentos y mayúsculas. Por ejemplo,
@@ -362,7 +364,7 @@ confirmación óptica o de los contactos físicos.
 
 La API añade `signals`, una lista opcional en configuraciones antiguas. Cada señal
 incluye `enabled`, `name`, `topic`, `jsonPath`, `blinkMs`, `lights` (`name`, `relay`
-1..N, hasta 32) y `aspects` (`value`, `on`, `blink`). `on` y `blink` contienen números de foco
+1..N, hasta 64) y `aspects` (`value`, `on`, `blink`). `on` y `blink` contienen números de foco
 locales 1..N, no números físicos RO. No pueden solaparse. Para eliminar todas las
 señales se envía `signals: []`; omitir el campo si ya hay señales se rechaza.
 
@@ -401,3 +403,63 @@ La adaptación mantiene el topic de entrada de detección existente
 actual; la referencia enumera `cv/<estacion>/<id>/state`.
 La resolución del broker sigue dependiendo del transporte de red existente
 (IP y DNS); no se ha añadido un resolvedor mDNS para W5500.
+
+
+Al guardar CV o desvíos, el resultado aparece también debajo del botón de guardado.
+Si el navegador rechaza un campo por su rango o formato, se muestra qué campo
+impide enviar la configuración. El almacenamiento sigue sujeto al espacio
+libre de LittleFS (o NVS si LittleFS no está disponible); si falla la escritura, no se aplican los cambios.
+Pruebas específicas: `python3 tests/test_nvs_defaults.py` y
+`node tests/test_detection_turnout_ui.cjs`.
+
+
+## Actualizar firmware desde la web
+
+Abre `/firmware.html` (enlace **Actualizar firmware**) y selecciona
+`.pio/build/esp32-s3-devkitc-1/firmware.bin`, generado con `pio run`.
+La página funciona por WiFi o Ethernet y está integrada en el firmware, incluso
+si falta LittleFS. Sube únicamente el binario de aplicación para esta placa,
+no `bootloader.bin`, `partitions.bin` ni una imagen LittleFS.
+
+La transferencia se escribe por bloques en la partición OTA inactiva; solo al
+completar y validar la imagen se selecciona para el próximo arranque. Si la
+transferencia se interrumpe, se aborta. Tras el éxito, el módulo se reinicia.
+La configuración NVS y LittleFS se conservan. Las páginas web se actualizan
+por separado con `pio run -t uploadfs` cuando corresponda.
+
+Para incorporar esta función por primera vez, carga el firmware por USB con
+`pio run -t upload`; después puedes abrir `/firmware.html` directamente.
+Carga también LittleFS para añadir el enlace al menú, conservando tu config.json.
+La tabla de particiones debe disponer de dos particiones OTA. La actualización
+comparte el acceso de la web local, sin autenticación; no expongas el puerto 80 a Internet.
+
+## Expansión Modbus RTU y 64 canales
+
+El mismo firmware admite `modbus.role` = `off`, `master` o `slave`, configurado
+como JSON desde **Hardware**. Se admiten hasta **64 entradas y 64 salidas** por
+placa/maestro, sumando canales locales y remotos, y hasta 16 módulos de hardware.
+El maestro centraliza MQTT, CV, señales y desvíos. Cada esclavo expone sus E/S
+locales por RS-485 y apaga las salidas al expirar su watchdog de escrituras.
+Consulta los ejemplos y el mapa Modbus en [examples/README.md](examples/README.md).
+
+El estado de una salida remota solo se confirma tras la respuesta del esclavo;
+la web muestra `No disponible` si se pierde la comunicación. Una escritura aún
+pendiente no implica fallo de hardware. Los CV remotos pierden validez al perder
+el enlace. El número máximo de CV/CE/desvíos sigue siendo 16 de cada tipo.
+
+Para permitir configuraciones de 64 canales, cuando LittleFS está disponible
+la configuración lógica se guarda mediante archivo temporal y renombrado en
+`/io-config.json`. Se siguen leyendo las antiguas instantáneas NVS como respaldo
+si ese archivo no existe. El guardado no borra el respaldo NVS. Una actualización
+OTA del firmware conserva los dos archivos. **Subir una imagen LittleFS sustituye
+su contenido**, incluida la configuración lógica: conserva una copia antes de
+usar `uploadfs`. La configuración física sigue en `/config.json`.
+
+Pruebas RTU simuladas: `python3 tests/test_modbus.py`.
+
+La página **Hardware** permite descargar `io-config.json` mediante `/api/backup`.
+La copia contiene la configuración completa, incluyendo credenciales MQTT.
+Para restaurarla al cargar LittleFS, colócala junto a `data/config.json` como
+`data/io-config.json` antes de generar la imagen.
+
+Referencia de transporte: [Modbus Serial Line V1.02](https://www.modbus.org/docs/Modbus_over_serial_line_V1_02.pdf).

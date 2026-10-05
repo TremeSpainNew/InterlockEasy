@@ -45,7 +45,7 @@
     let body;
     try {body = JSON.stringify(JSON.parse(editor.value));}
     catch(error) {message.textContent = 'JSON no válido: ' + error.message; return;}
-    if (new TextEncoder().encode(body).length > 16384) {message.textContent = 'El JSON supera 16 KiB.'; return;}
+    if (new TextEncoder().encode(body).length > 32768) {message.textContent = 'El JSON supera 32 KiB.'; return;}
     lock(true); message.textContent = 'Validando y guardando…';
     try {
       const result = JSON.parse(await request({method:'POST', headers:{'Content-Type':'application/json','X-Interlock':'1'}, body}));

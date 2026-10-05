@@ -1,4 +1,8 @@
 #include "ConfigManager.h"
+#ifdef ARDUINO_ARCH_ESP32
+#include <LittleFS.h>
+#include "HardwareConfig.h"
+#endif
 #include "JsonPayload.h"
 
 #include <utility>
@@ -53,6 +57,23 @@ String optionalString(Preferences& prefs, const char* key, const char* fallback)
     return prefs.isKey(key) ? prefs.getString(key, fallback) : String(fallback);
 }
 
+bool persistSnapshot(Preferences& prefs,const String& value) {
+#ifdef ARDUINO_ARCH_ESP32
+    if(Hardware.filesystemReady){
+        File temp=LittleFS.open("/io-config.tmp","w");
+        if(!temp)return false;
+        const size_t written=temp.print(value);temp.flush();temp.close();
+        File check=LittleFS.open("/io-config.tmp","r");
+        check.setTimeout(0);
+        const bool good=check && written==value.length() && check.size()==value.length() && check.readString()==value;
+        check.close();
+        if(good && LittleFS.rename("/io-config.tmp","/io-config.json"))return true;
+        LittleFS.remove("/io-config.tmp");return false;
+    }
+#endif
+    return prefs.putBytes("config_v1",value.c_str(),value.length())==value.length();
+}
+
 } // namespace
 
 
@@ -62,13 +83,42 @@ void ConfigManager::begin() {
     // Carga las antiguas claves individuales como valores base.
     load();
 
-    String stored = optionalString(prefs, "config_v1", "");
-    if (stored.isEmpty()) return;
+    bool storedFile=false;
+#ifdef ARDUINO_ARCH_ESP32
+    storedFile=Hardware.filesystemReady&&LittleFS.exists("/io-config.json");
+#endif
+    if (!storedFile && !prefs.isKey("config_v1")) return;
 
     DynamicJsonDocument doc(65536);
     String error;
+    DeserializationError parseError;
+#ifdef ARDUINO_ARCH_ESP32
+    if(storedFile){
+        File file=LittleFS.open("/io-config.json","r");
+        if(!file||file.size()>131072){Serial.println("ERROR: io-config.json no valido.");return;}
+        parseError=deserializeJson(doc,file);
+    }else
+#endif
+    if (prefs.getType("config_v1") == PT_BLOB) {
+        const size_t size = prefs.getBytesLength("config_v1");
+        if (!size || size > 65536) {
+            Serial.println("ERROR: tamano de configuracion NVS no valido.");
+            return;
+        }
+        std::vector<char> stored(size);
+        if (prefs.getBytes("config_v1", stored.data(), size) != size) {
+            Serial.println("ERROR: no se pudo leer la configuracion NVS.");
+            return;
+        }
+        parseError = deserializeJson(doc, static_cast<const char*>(stored.data()), size);
+    } else {
+        // Read older firmware snapshots without erasing or rewriting them.
+        const String stored = optionalString(prefs, "config_v1", "");
+        if (stored.isEmpty()) return;
+        parseError = deserializeJson(doc, stored);
+    }
 
-    if (deserializeJson(doc, stored)) {
+    if (parseError) {
         Serial.println("ERROR: JSON NVS no valido.");
         return;
     }
@@ -480,8 +530,7 @@ bool ConfigManager::save() {
     serializeJson(doc, value);
 
     return
-        prefs.putString("config_v1", value) ==
-        value.length();
+        persistSnapshot(prefs,value);
 }
 
 
@@ -869,7 +918,7 @@ bool ConfigManager::applyJson(
             return false;
         }
 
-        uint32_t reservedRelays = 0;
+        uint64_t reservedRelays = 0;
 
         for (JsonObjectConst item :
              doc["signals"].as<JsonArrayConst>()) {
@@ -935,7 +984,7 @@ bool ConfigManager::applyJson(
                     item["blinkMs"].as<uint16_t>();
             }
 
-            uint32_t mask = 0;
+            uint64_t mask = 0;
 
             for (JsonObjectConst light :
                  item["lights"].as<JsonArrayConst>()) {
@@ -955,8 +1004,8 @@ bool ConfigManager::applyJson(
                 entry.relay =
                     light["relay"].as<uint8_t>();
 
-                const uint32_t bit =
-                    uint32_t(1) << (entry.relay - 1);
+                const uint64_t bit =
+                    uint64_t(1) << (entry.relay - 1);
 
                 if (mask & bit) {
                     error =
@@ -1053,7 +1102,7 @@ bool ConfigManager::applyJson(
                 for (size_t i = 0;
                      i < outputs.size();
                      ++i) {
-                    if ((mask & (1U << i)) &&
+                    if ((mask & (uint64_t(1) << i)) &&
                         nextOutputs[i].enabled) {
                         error =
                             "Deshabilita el mando individual de los "
@@ -1132,7 +1181,7 @@ bool ConfigManager::applyJson(
 
     // Una entrada fisica no puede pertenecer simultaneamente
     // a dos elementos de deteccion.
-    uint32_t reservedInputs = 0;
+    uint64_t reservedInputs = 0;
 
 
     if (doc.containsKey("cvs")) {
@@ -1160,7 +1209,7 @@ bool ConfigManager::applyJson(
             cv.input =
                 item["input"].as<uint8_t>();
 
-            if (cv.input < 1 ||
+            if (item["input"].as<unsigned int>()>64 || cv.input < 1 ||
                 cv.input > inputs.size()) {
                 return false;
             }
@@ -1174,8 +1223,8 @@ bool ConfigManager::applyJson(
                     return false;
                 }
 
-                const uint32_t bit =
-                    uint32_t(1) << (cv.input - 1);
+                const uint64_t bit =
+                    uint64_t(1) << (cv.input - 1);
 
                 if (reservedInputs & bit) {
                     error =
@@ -1221,7 +1270,7 @@ bool ConfigManager::applyJson(
             counter.inputB =
                 item["inputB"].as<uint8_t>();
 
-            if (counter.inputA < 1 ||
+            if (item["inputA"].as<unsigned int>()>64 || item["inputB"].as<unsigned int>()>64 || counter.inputA < 1 ||
                 counter.inputA > inputs.size() ||
                 counter.inputB < 1 ||
                 counter.inputB > inputs.size() ||
@@ -1233,6 +1282,12 @@ bool ConfigManager::applyJson(
             }
 
             if (counter.enabled) {
+#ifdef ARDUINO_ARCH_ESP32
+                if(Hardware.modules[Hardware.inputs[counter.inputA-1].module].type==ModuleType::MODBUS ||
+                   Hardware.modules[Hardware.inputs[counter.inputB-1].module].type==ModuleType::MODBUS){
+                    error="Los cuenta-ejes requieren entradas locales; el sondeo RTU puede perder pulsos.";return false;
+                }
+#endif
                 if (!mqttIdField(counter.station) ||
                     !mqttIdField(counter.id)) {
                     error =
@@ -1241,9 +1296,9 @@ bool ConfigManager::applyJson(
                     return false;
                 }
 
-                const uint32_t mask =
-                    (uint32_t(1) << (counter.inputA - 1)) |
-                    (uint32_t(1) << (counter.inputB - 1));
+                const uint64_t mask =
+                    (uint64_t(1) << (counter.inputA - 1)) |
+                    (uint64_t(1) << (counter.inputB - 1));
 
                 if (reservedInputs & mask) {
                     error =
@@ -1265,7 +1320,7 @@ bool ConfigManager::applyJson(
     // AGUJAS / DESVIOS
     // ========================================================
     std::vector<TurnoutConfig> nextTurnouts;
-    uint32_t turnoutRelays = 0;
+    uint64_t turnoutRelays = 0;
 
     if (!doc.containsKey("turnouts")) {
         if (!turnouts.empty()) {
@@ -1306,7 +1361,9 @@ bool ConfigManager::applyJson(
             else return false;
             t.pulseMs=item["pulseMs"].as<uint16_t>();
 
-            if (t.outputNormal<1 || t.outputNormal>outputs.size() ||
+            if (item["outputNormal"].as<unsigned int>()>64 || item["outputReverse"].as<unsigned int>()>64 ||
+                item["inputNormal"].as<unsigned int>()>64 || item["inputReverse"].as<unsigned int>()>64 ||
+                item["pulseMs"].as<unsigned int>()>10000 || t.outputNormal<1 || t.outputNormal>outputs.size() ||
                 t.outputReverse<1 || t.outputReverse>outputs.size() ||
                 t.outputNormal==t.outputReverse ||
                 t.pulseMs<50 || t.pulseMs>10000) {
@@ -1324,13 +1381,19 @@ bool ConfigManager::applyJson(
             }
 
             if (t.enabled) {
+#ifdef ARDUINO_ARCH_ESP32
+                const auto normal=Hardware.outputs[t.outputNormal-1],reverse=Hardware.outputs[t.outputReverse-1];
+                if((Hardware.modules[normal.module].type==ModuleType::MODBUS || Hardware.modules[reverse.module].type==ModuleType::MODBUS) && normal.module!=reverse.module){
+                    error="Las dos salidas de una aguja remota deben pertenecer al mismo esclavo.";return false;
+                }
+#endif
                 if (!mqttIdField(t.station) || !mqttIdField(t.id)) {
                     error="Aguja: estacion e ID no validos.";
                     return false;
                 }
 
-                const uint32_t relayMask=(uint32_t(1)<<(t.outputNormal-1)) |
-                                         (uint32_t(1)<<(t.outputReverse-1));
+                const uint64_t relayMask=(uint64_t(1)<<(t.outputNormal-1)) |
+                                         (uint64_t(1)<<(t.outputReverse-1));
                 if (turnoutRelays & relayMask) {
                     error="Dos agujas habilitadas comparten reles.";
                     return false;
@@ -1342,7 +1405,7 @@ bool ConfigManager::applyJson(
                     }
                 }
                 for (size_t r=0;r<nextOutputs.size();++r) {
-                    if ((relayMask&(uint32_t(1)<<r)) && nextOutputs[r].enabled) {
+                    if ((relayMask&(uint64_t(1)<<r)) && nextOutputs[r].enabled) {
                         error="Deshabilita el mando individual de los reles asignados a una aguja.";
                         return false;
                     }
@@ -1350,8 +1413,8 @@ bool ConfigManager::applyJson(
                 turnoutRelays |= relayMask;
 
                 if (fullFeedback) {
-                    const uint32_t inputMask=(uint32_t(1)<<(t.inputNormal-1)) |
-                                             (uint32_t(1)<<(t.inputReverse-1));
+                    const uint64_t inputMask=(uint64_t(1)<<(t.inputNormal-1)) |
+                                             (uint64_t(1)<<(t.inputReverse-1));
                     if (reservedInputs & inputMask) {
                         error="Una aguja comparte entradas con otro elemento de deteccion.";
                         return false;
@@ -1373,7 +1436,7 @@ bool ConfigManager::applyJson(
     // Las entradas reservadas por CV / CE no pueden publicar tambien
     // como entradas MQTT genericas.
     for (size_t i = 0; i < nextInputs.size(); ++i) {
-        if ((reservedInputs & (uint32_t(1) << i)) &&
+        if ((reservedInputs & (uint64_t(1) << i)) &&
             nextInputs[i].enabled) {
             error =
                 "DI" + String(i + 1) +
@@ -1530,13 +1593,10 @@ bool ConfigManager::applyJson(
         String value;
         serializeJson(saved, value);
 
-        if (prefs.putString(
-                "config_v1",
-                value
-            ) != value.length()) {
+        if (!persistSnapshot(prefs,value)) {
 
             error =
-                "No se pudo guardar en NVS. "
+                "No se pudo guardar la configuracion. "
                 "No se aplicaron los cambios.";
 
             return false;
@@ -1584,7 +1644,7 @@ bool ConfigManager::relayAssigned(
     for (const auto& signal : signals) {
         if (signal.enabled &&
             (signal.relayMask() &
-             (uint32_t(1) << channel))) {
+             (uint64_t(1) << channel))) {
             return true;
         }
     }

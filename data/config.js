@@ -99,7 +99,7 @@
     lock(true); message.textContent = 'Cargando…';
     try {
       const data = await request();
-      if (!data.mqtt || !Array.isArray(data.inputs) || data.inputs.length > 32 || !Array.isArray(data.outputs) || data.outputs.length > 32) throw new Error('Configuración no válida.');
+      if (!data.mqtt || !Array.isArray(data.inputs) || data.inputs.length > 64 || !Array.isArray(data.outputs) || data.outputs.length > 64) throw new Error('Configuración no válida.');
       outputCount = data.outputs.length;
       container.replaceChildren();
       const broker = document.createElement('fieldset');

@@ -18,6 +18,7 @@ source = r'''
 #include <utility>
 ConfigManager Config;
 bool ConfigManager::relayAssigned(uint8_t) const {return false;}
+bool ConfigManager::inputAssigned(uint8_t) const {return false;}
 MqttManager MQTT;
 std::vector<std::pair<int,bool>> events;
 void MqttManager::publishInput(uint8_t c,bool s) {events.emplace_back(c,s);}
@@ -72,7 +73,7 @@ int main() {
 with tempfile.TemporaryDirectory(prefix='interlock-debounce-') as directory:
  p=Path(directory)
  for name,value in stubs.items(): (p/name).write_text(value)
- (p/'test.cpp').write_text(source)
+ (p/'test.cpp').write_text('#include "'+str(ROOT/'tests/modbus_stub.h')+'"\n'+source)
  subprocess.run(['c++','-std=c++17',f'-I{p}',f'-I{ROOT / "src"}',str(ROOT/'src/IOManager.cpp'),str(ROOT/'src/HardwareIO.cpp'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 print('OK: bouncing ON/OFF, independent intervals, inversion, refresh, disabled filter and timer rollover')

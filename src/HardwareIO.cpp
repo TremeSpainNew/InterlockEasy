@@ -1,5 +1,6 @@
 #include "HardwareIO.h"
 #include <Wire.h>
+#include "ModbusRtu.h"
 #ifdef ARDUINO_ARCH_ESP32
 #include <driver/gpio.h>
 #endif
@@ -18,14 +19,17 @@ bool HardwareIO::latch(uint8_t m,uint16_t value) {
     return Wire.endTransmission()==0;
 }
 bool HardwareIO::begin() {
+    initialized=false;
     devices.assign(Hardware.modules.size(), Device{}); states=0;
     bool needsI2c=false;
-    for(auto m:Hardware.modules)if(m.type!=ModuleType::GPIO)needsI2c=true;
+    for(auto m:Hardware.modules)if(m.type!=ModuleType::GPIO && m.type!=ModuleType::MODBUS)needsI2c=true;
     for(auto c:Hardware.inputs) {
+        if(Hardware.modules[c.module].type==ModuleType::MODBUS)continue;
         if(Hardware.modules[c.module].type==ModuleType::GPIO)pinMode(c.pin,c.pullup?INPUT_PULLUP:INPUT);
         else if(c.pullup)devices[c.module].pullup |= uint16_t(1U<<c.pin);
     }
     for(auto c:Hardware.outputs) {
+        if(Hardware.modules[c.module].type==ModuleType::MODBUS)continue;
         if(Hardware.modules[c.module].type==ModuleType::GPIO) {
             // Arduino-ESP32 3.x digitalWrite ignores pins not attached to GPIO yet.
 #ifdef ARDUINO_ARCH_ESP32
@@ -44,7 +48,7 @@ bool HardwareIO::begin() {
     bool ok=true;
     for(uint8_t m=0;m<devices.size();++m) {
         auto type=Hardware.modules[m].type;auto& d=devices[m];
-        if(type==ModuleType::GPIO)continue;
+        if(type==ModuleType::GPIO || type==ModuleType::MODBUS)continue;
         bool good=true;
         if(type==ModuleType::MCP23017) {
             // Normalize BANK/SEQOP even after an MCU-only reset. Disable interrupts.
@@ -56,12 +60,19 @@ bool HardwareIO::begin() {
         if(good && type==ModuleType::TCA9554)good=reg(m,2,0,false) && reg(m,3,d.direction,false);
         ok=ok && good;
     }
-    sample();return ok;
+    sample();initialized=ok;return ok;
 }
 void HardwareIO::sample() {
+    for(uint8_t i=0;i<Hardware.outputs.size();++i){
+        auto ch=Hardware.outputs[i];
+        if(Hardware.modules[ch.module].type!=ModuleType::MODBUS)continue;
+        const uint64_t bit=uint64_t(1)<<i;
+        const bool state=bool(Modbus.outputs(ch.module)&(uint64_t(1)<<ch.pin))!=ch.activeLow;
+        states=(states&~bit)|(state?bit:0);
+    }
     for(uint8_t m=0;m<devices.size();++m) {
         auto type=Hardware.modules[m].type;auto& d=devices[m];d.valid=false;
-        if(type==ModuleType::GPIO)continue;
+        if(type==ModuleType::GPIO || type==ModuleType::MODBUS)continue;
         bool hasInput=false;for(auto c:Hardware.inputs)if(c.module==m)hasInput=true;
         if(!hasInput)continue;
         uint8_t address=Hardware.modules[m].address;
@@ -79,14 +90,25 @@ bool HardwareIO::read(uint8_t channel,bool& value) const {
     if(channel>=Hardware.inputs.size())return false;
     auto c=Hardware.inputs[channel];
     if(Hardware.modules[c.module].type==ModuleType::GPIO) {value=digitalRead(c.pin);return true;}
+    if(Hardware.modules[c.module].type==ModuleType::MODBUS)return Modbus.input(c.module,c.pin,value);
     if(!devices[c.module].valid)return false;
     value=(devices[c.module].sample & (1U<<c.pin))!=0; return true;
 }
-bool HardwareIO::write(uint32_t mask,uint32_t desired) {
+bool HardwareIO::write(uint64_t mask,uint64_t desired) {
+    if(!initialized)return false;
+    bool confirmed=true;
     for(uint8_t m=0;m<devices.size();++m) {
-        auto& d=devices[m];uint16_t next=d.latch;uint32_t affected=0;
+        if(Hardware.modules[m].type==ModuleType::MODBUS){
+            for(uint8_t i=0;i<Hardware.outputs.size();++i){
+                const auto ch=Hardware.outputs[i];const uint64_t bit=uint64_t(1)<<i;
+                if(ch.module==m && (mask&bit))
+                    if(!Modbus.requestOutput(m,ch.pin,bool(desired&bit)!=ch.activeLow))confirmed=false;
+            }
+            continue;
+        }
+        auto& d=devices[m];uint16_t next=d.latch;uint64_t affected=0;
         for(uint8_t i=0;i<Hardware.outputs.size();++i) {
-            auto c=Hardware.outputs[i];uint32_t bit=uint32_t(1)<<i;
+            auto c=Hardware.outputs[i];uint64_t bit=uint64_t(1)<<i;
             if(c.module!=m || !(mask&bit))continue;
             affected |= bit;
             if(Hardware.modules[m].type!=ModuleType::GPIO) {
@@ -96,11 +118,17 @@ bool HardwareIO::write(uint32_t mask,uint32_t desired) {
         }
         if(!affected)continue;
         if(Hardware.modules[m].type==ModuleType::GPIO) {
-            for(uint8_t i=0;i<Hardware.outputs.size();++i)if(affected&(uint32_t(1)<<i)) {
-                auto c=Hardware.outputs[i];digitalWrite(c.pin,bool(desired&(uint32_t(1)<<i))!=c.activeLow);
+            for(uint8_t i=0;i<Hardware.outputs.size();++i)if(affected&(uint64_t(1)<<i)) {
+                auto c=Hardware.outputs[i];digitalWrite(c.pin,bool(desired&(uint64_t(1)<<i))!=c.activeLow);
             }
         } else if(next!=d.latch && !latch(m,next))return false;
         d.latch=next; states=(states&~affected)|(desired&affected);
     }
-    return true;
+    return confirmed;
+}
+
+bool HardwareIO::outputReady(uint8_t channel) const {
+    if(channel>=Hardware.outputs.size())return false;
+    auto ch=Hardware.outputs[channel];
+    return Hardware.modules[ch.module].type!=ModuleType::MODBUS || Modbus.outputReady(ch.module);
 }

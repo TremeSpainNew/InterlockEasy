@@ -21,16 +21,30 @@ inline SerialStub Serial;
 'Preferences.h': r'''#pragma once
 #include <map>
 #include <cassert>
+#include <set>
+#include <cstring>
 inline std::map<std::string, String> storage;
 inline bool failWrite = false;
+inline std::set<std::string> blobKeys;
+enum PreferenceType { PT_STR, PT_BLOB };
 class Preferences {
 public:
  bool begin(const char*, bool) {return true;}
+ PreferenceType getType(const char* key) {return blobKeys.count(key)?PT_BLOB:PT_STR;}
+ size_t getBytesLength(const char* key) {return storage.at(key).size();}
+ size_t getBytes(const char* key, void* buffer, size_t len) {
+   const auto& value=storage.at(key);if(len<value.size())return 0;
+   memcpy(buffer,value.data(),value.size());return value.size();
+ }
+ size_t putBytes(const char* key, const void* buffer, size_t len) {
+   if(failWrite)return 0;
+   storage[key]=std::string(static_cast<const char*>(buffer),len);blobKeys.insert(key);return len;
+ }
  bool isKey(const char* key) {return storage.count(key) != 0;}
  String getString(const char* key, const char* fallback) {assert(isKey(key)); return storage[key];}
  uint16_t getUShort(const char*, uint16_t fallback) {return fallback;}
  bool getBool(const char*, bool fallback) {return fallback;}
- size_t putString(const char* key, const String& value) {if(failWrite) return 0; storage[key]=value; return value.length();}
+ size_t putString(const char* key, const String& value) {if(failWrite || value.length()+1>4000) return 0; storage[key]=value; blobKeys.erase(key); return value.length();}
 };
 ''',
 'ArduinoJson.h': r'''#pragma once
@@ -143,26 +157,24 @@ int main() {
  s["aspects"][0]["blink"][0]=3;
  assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
  s["aspects"][0]["blink"][0]=4;
- auto tracks=d["trackSections"].as<JsonArray>();
+ auto tracks=d["axleCounters"].as<JsonArray>();
  auto track=tracks.createNestedObject();
- track["enabled"]=true; track["type"]="axleCounter"; track["name"]="CE1";
- track["inputA"]=1; track["inputB"]=2; track["stateTopic"]="via/1/state";
- track["countTopic"]="via/1/count"; track["payloadOccupied"]=R"({"Estado":"Ocupado"})";
- track["payloadFree"]=R"({"Estado":"Libre"})"; track["retain"]=true;
+ track["enabled"]=true;track["station"]="EST";track["id"]="CE1";
+ track["inputA"]=5;track["inputB"]=6;
  assert(Config.applyJson(d.as<JsonVariantConst>(),error));
- ConfigManager trackReboot; trackReboot.begin();
- assert(trackReboot.trackSections.size()==1 && trackReboot.trackSections[0].inputB==2);
- auto duplicate=tracks.createNestedObject(); duplicate.set(track); duplicate["name"]="CE2";
+ ConfigManager trackReboot;trackReboot.begin();
+ assert(trackReboot.axleCounters.size()==1 && trackReboot.axleCounters[0].inputB==6);
+ auto duplicate=tracks.createNestedObject();duplicate.set(track);duplicate["id"]="CE2";
  assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
- tracks.remove(1); track["inputB"]=1;
+ tracks.remove(1);track["inputB"]=5;
  assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
- track["inputB"]=2;
- Config.inputs.resize(32); Config.outputs.resize(32);
- Config.toJson(d,true); assert(d["inputs"].size()==32 && d["outputs"].size()==32);
+ track["inputB"]=6;
+ Config.inputs.resize(64); Config.outputs.resize(64);
+ Config.toJson(d,true); assert(d["inputs"].size()==64 && d["outputs"].size()==64);
  d["inputs"][0]["name"]="Keep me";
- d["signals"][0]["lights"][3]["relay"]=32;
+ d["signals"][0]["lights"][3]["relay"]=64;
  assert(Config.applyJson(d.as<JsonVariantConst>(),error));
- assert(Config.relayAssigned(31));
+ assert(Config.relayAssigned(63));
  Config.inputs.resize(16); Config.outputs.resize(16); Config.begin();
  assert(Config.inputs.size()==16 && Config.outputs.size()==16);
  assert(Config.inputs[0].name=="Keep me" && Config.signals.empty());

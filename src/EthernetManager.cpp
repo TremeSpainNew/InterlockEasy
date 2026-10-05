@@ -5,6 +5,7 @@
 EthernetManager Connectivity;
 
 bool EthernetManager::begin() {
+    if(Hardware.networkType==NetworkType::NONE)return true;
     if (Hardware.networkType == NetworkType::WIFI) {
         if (WiFi.status() == WL_CONNECTED) return true;
         if (accessPoint) return true;
@@ -45,10 +46,12 @@ void EthernetManager::loop() {
 }
 
 bool EthernetManager::connected() {
+    if(Hardware.networkType==NetworkType::NONE)return false;
     return Hardware.networkType == NetworkType::WIFI ? (WiFi.status() == WL_CONNECTED || accessPoint) : Ethernet.linkStatus() == LinkON;
 }
 
 IPAddress EthernetManager::ip() {
+    if(Hardware.networkType==NetworkType::NONE)return IPAddress();
     if (Hardware.networkType == NetworkType::WIFI)
         return accessPoint && WiFi.status() != WL_CONNECTED ? WiFi.softAPIP() : WiFi.localIP();
     return Ethernet.localIP();

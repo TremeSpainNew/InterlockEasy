@@ -57,7 +57,10 @@ void DetectionManager::processCv(uint8_t i) {
     auto& state=cvStates[i];
     if (!cfg.enabled || cfg.input<1 || cfg.input>NUM_INPUTS) return;
     const uint8_t input=cfg.input-1;
-    if (!IO.inputReady(input)) { state.valid=false; return; }
+    if (!IO.inputReady(input)) {
+        if(state.valid)MQTT.publishValue(cfg.topic(),"\"desconexion\"",true);
+        state.valid=false; return;
+    }
     const bool occupied=IO.getInput(input);
     if (!state.valid || occupied!=state.occupied) {
         state.valid=true; state.occupied=occupied; publishCv(i);

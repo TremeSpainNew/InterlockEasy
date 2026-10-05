@@ -65,6 +65,7 @@ TEST = """#include "HardwareDefaults.h"
 #include <utility>
 ConfigManager Config;
 bool ConfigManager::relayAssigned(uint8_t) const { return false; }
+bool ConfigManager::inputAssigned(uint8_t) const { return false; }
 MqttManager MQTT;
 std::vector<std::pair<int, bool>> published;
 void MqttManager::publishInput(uint8_t, bool) {}
@@ -117,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix="interlock-relays-") as directory:
     folder = Path(directory)
     for name, content in STUBS.items():
         (folder / name).write_text(content)
-    (folder / "test.cpp").write_text(TEST)
+    (folder / "test.cpp").write_text('#include "'+str(ROOT/'tests/modbus_stub.h')+'"\n'+TEST)
     executable = folder / "test"
     subprocess.run([
         "c++", "-std=c++17", "-Wall", "-Wextra", "-Werror",

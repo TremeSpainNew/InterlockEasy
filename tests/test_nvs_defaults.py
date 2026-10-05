@@ -22,11 +22,42 @@ int main() {
  DynamicJsonDocument doc(65536);
  Config.toJson(doc,true);
  doc["mqtt"]["host"]="saved-broker";
+ String legacyJson;serializeJson(doc,legacyJson);
+ Preferences legacyStore;
+ assert(legacyStore.putString("config_v1",legacyJson)==legacyJson.length());
+ ConfigManager legacyBoot;legacyBoot.begin();
+ assert(legacyBoot.mqtt.host=="saved-broker");
+ // Same full snapshot sent by the detection and turnout forms.
+ for(int i=0;i<8;++i) {
+   doc["inputs"][i]["name"]="Entrada de deteccion del circuito de via de la estacion norte";
+   doc["outputs"][i]["name"]="Salida de accionamiento del desvio de entrada estacion norte";
+ }
+ JsonObject cv=doc["cvs"].createNestedObject();
+ cv["enabled"]=true;cv["station"]="EST";cv["id"]="CV1";cv["input"]=1;
+ JsonObject t=doc["turnouts"].createNestedObject();
+ t["enabled"]=true;t["station"]="EST";t["id"]="A1";
+ t["outputNormal"]=1;t["outputReverse"]=2;t["inputNormal"]=2;t["inputReverse"]=3;
+ t["drive"]="pulse";t["pulseMs"]=500;
+ for(int i=4;i<=7;++i) {
+   JsonObject extra=doc["cvs"].createNestedObject();
+   extra["enabled"]=true;extra["station"]="EST";extra["id"]=String(i);extra["input"]=i;
+ }
+ assert(measureJson(doc)>4000);
+ String largeJson;serializeJson(doc,largeJson);
+ assert(legacyStore.putString("config_v1",largeJson)==0);
  String error;
  assert(Config.applyJson(doc.as<JsonVariantConst>(),error));
  ConfigManager reboot;
  reboot.begin();
  assert(reboot.mqtt.host=="saved-broker");
+ assert(reboot.cvs.size()==5 && reboot.cvs[0].id=="CV1");
+ assert(reboot.turnouts.size()==1 && reboot.turnouts[0].inputReverse==3);
+ const auto previous=storage;
+ doc["cvs"][0]["id"]="CV2";failWrite=true;
+ assert(!Config.applyJson(doc.as<JsonVariantConst>(),error));
+ assert(Config.cvs[0].id=="CV1" && storage==previous);
+ failWrite=false;
+ assert(Config.save());
 }
 '''
 with tempfile.TemporaryDirectory(prefix='interlock-config-') as directory:

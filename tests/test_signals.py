@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 scope = {'__file__': str(ROOT/'tests/test_config.py')}
 exec((ROOT/'tests/test_config.py').read_text().split('TEST =')[0], scope)
 stubs = scope['STUBS'].copy()
-stubs['Arduino.h'] = stubs['Arduino.h'].replace('void println(const char*) {}', 'void println(const char*) {} template<class T> void println(const T&) {} template<class T> void print(const T&) {} template<class... T> void printf(const char*, T...) {}') + '''
+stubs['Arduino.h'] = stubs['Arduino.h'].replace('void println(const char*) {}', 'void println(const char*) {} template<class... T> void printf(const char*, T...) {}') + '''
 using byte = uint8_t;
 inline unsigned long clockMs = 0;
 inline unsigned long millis() {return clockMs;}
@@ -83,13 +83,13 @@ int main() {
  assert(Signals.testAspect(0,"Precaucion"));
  Signals.reload();clockMs=1600;Signals.loop();assert(Signals.aspect(0).isEmpty());
  assert(IO.getOutput(1)); // Save stops animation, holds the current physical command.
- Hardware.modules={{ModuleType::PCF8575,32},{ModuleType::PCF8575,33}};
- Hardware.inputs.clear();Hardware.outputs.clear();Config.inputs.clear();Config.outputs.resize(32);
- for(uint8_t i=0;i<32;++i)Hardware.outputs.push_back({uint8_t(i/16),uint8_t(i%16),true,false});
- Config.signals[0].lights[2].relay=32;
- IO.begin();assert(Signals.testAspect(0,"ViaLibre"));assert(IO.getOutput(31) && !IO.getOutput(2));
- IO.setOutput(31,false);assert(IO.getOutput(31)); // High relay bit is also reserved.
- assert(Signals.testAspect(0,"Parada"));assert(!IO.getOutput(31) && IO.getOutput(0));
+ Hardware.modules={{ModuleType::PCF8575,32},{ModuleType::PCF8575,33},{ModuleType::PCF8575,34},{ModuleType::PCF8575,35}};
+ Hardware.inputs.clear();Hardware.outputs.clear();Config.inputs.clear();Config.outputs.resize(64);
+ for(uint8_t i=0;i<64;++i)Hardware.outputs.push_back({uint8_t(i/16),uint8_t(i%16),true,false});
+ Config.signals[0].lights[2].relay=64;
+ IO.begin();assert(Signals.testAspect(0,"ViaLibre"));assert(IO.getOutput(63) && !IO.getOutput(2));
+ IO.setOutput(63,false);assert(IO.getOutput(63)); // High relay bit is also reserved.
+ assert(Signals.testAspect(0,"Parada"));assert(!IO.getOutput(63) && IO.getOutput(0));
  Signals.disconnected("other");assert(IO.getOutput(0));
  Signals.disconnected("s1");assert(!IO.getOutput(0) && Signals.aspect(0).isEmpty());
  clockMs+=1000;Signals.loop();assert(!IO.getOutput(0));
@@ -98,7 +98,7 @@ int main() {
 with tempfile.TemporaryDirectory(prefix='interlock-signals-') as directory:
  p=Path(directory)
  for name,content in stubs.items(): (p/name).write_text(content)
- (p/'test.cpp').write_text(test)
+ (p/'test.cpp').write_text('#include "'+str(ROOT/'tests/modbus_stub.h')+'"\n'+test)
  subprocess.run(['c++','-std=c++17',f'-I{p}',f'-I{ROOT / "src"}',f'-I{ROOT / ".pio/libdeps/esp32-s3-devkitc-1/ArduinoJson/src"}',*[str(ROOT/'src'/name) for name in ['ConfigManager.cpp','IOManager.cpp','HardwareIO.cpp','SignalManager.cpp']],str(p/'test.cpp'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 print('OK: signal aspects, exclusive relays, grouped writes, blink phases and I2C failure/retry')

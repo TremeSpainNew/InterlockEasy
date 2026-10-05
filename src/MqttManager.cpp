@@ -42,7 +42,7 @@ void MqttManager::subscribeOutputs(){
 void MqttManager::safeOutputs(){
     Signals.reload();
     Turnouts.stop();
-    IO.setOutputs(UINT32_MAX,0);
+    IO.setOutputs(UINT64_MAX,0);
 }
 
 bool MqttManager::registerTopics(){
@@ -94,7 +94,7 @@ void MqttManager::flushInput(){
 }
 void MqttManager::publishOutput(uint8_t ch,bool state){
     if(!mqtt||!mqtt->connected()||ch>=NUM_OUTPUTS)return;auto& c=Config.outputs[ch];
-    if(!c.enabled||!c.publishState||c.stateTopic.isEmpty())return;
+    if(!IO.outputReady(ch)||!c.enabled||!c.publishState||c.stateTopic.isEmpty())return;
     const String& p=state?c.stateOn:c.stateOff;mqtt->publish(c.stateTopic.c_str(),p.c_str(),c.retain);
 }
 bool MqttManager::publishValue(const String& topic,const String& payload,bool retain){return mqtt&&mqtt->connected()&&!topic.isEmpty()&&mqtt->publish(topic.c_str(),payload.c_str(),retain);}

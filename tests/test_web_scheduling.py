@@ -43,13 +43,14 @@ struct File {
 };
 struct WebManager {
  Server ethernetServer,wifiServer;Client ethernetClient,wifiClient;Client* client=nullptr;File file;
- unsigned long started=0,restartAt=0;bool responding=false,readingBody=false,testRequest=false,hardwareRequest=false,restartPending=false;
+ unsigned long started=0,restartAt=0;bool firmwareRequest=false;bool responding=false,readingBody=false,testRequest=false,hardwareRequest=false,restartPending=false;
  size_t contentLength=0,offset=0;String request,body,pending;
  int dispatched=0;
  void close(){if(client)client->socket->open=false;client=nullptr;responding=false;}
  void dispatch(){++dispatched;responding=true;pending="OK";}
  void testControl(){}void saveHardwareConfig(){}void saveConfig(){}
  void respond(int,const char*,const char*,const char*){}
+ void receiveFirmware(){}
  void loop();
 };
 '''

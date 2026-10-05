@@ -8,6 +8,7 @@
 #include "HardwareConfig.h"
 #include "DetectionManager.h"
 #include "TurnoutManager.h"
+#include "ModbusRtu.h"
 
 static bool hardwareValid=false;
 
@@ -28,9 +29,14 @@ void setup(){
 
     Config.begin();
     IO.begin();
+    Modbus.begin();
     Detections.reload();
     Turnouts.reload();
 
+    if(Hardware.modbus.role==ModbusRole::SLAVE){
+        if(Hardware.networkType!=NetworkType::NONE){Connectivity.begin();Web.begin();}
+        return;
+    }
     while(!Connectivity.begin()){
         Serial.println("Red no disponible. Reintentando...");
         delay(5000);
@@ -45,7 +51,15 @@ void setup(){
 
 void loop(){
     if(!hardwareValid){delay(100);return;}
+    Modbus.loop();
     IO.loop();
+    if(Hardware.modbus.role==ModbusRole::SLAVE){
+        if(Hardware.networkType!=NetworkType::NONE){
+            if(Hardware.networkType==NetworkType::WIFI&&!Connectivity.connected())Connectivity.begin();
+            Connectivity.loop();Web.loop();
+        }
+        return;
+    }
     Detections.loop();
     Turnouts.loop();
     Connectivity.loop();

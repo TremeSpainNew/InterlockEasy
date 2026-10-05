@@ -51,8 +51,9 @@ bool ConfigManager::inputAssigned(uint8_t)const{return false;}
 bool ConfigManager::relayAssigned(uint8_t)const{return false;}
 void IOManager::refreshInputs(){} bool IOManager::getInput(uint8_t){return false;}
 bool IOManager::getOutput(uint8_t){return false;}
+bool IOManager::outputReady(uint8_t)const{return true;}
 void IOManager::setOutput(uint8_t,bool){++commands;}
-bool IOManager::setOutputs(uint32_t,uint32_t){++stops;return true;}
+bool IOManager::setOutputs(uint64_t,uint64_t){++stops;return true;}
 SignalManager::SignalManager(){} void SignalManager::reload(){}
 void SignalManager::command(const String&,const String&){++commands;}
 void SignalManager::disconnected(const String&){++stops;}

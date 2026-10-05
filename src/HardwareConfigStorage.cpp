@@ -7,8 +7,8 @@ bool HardwareConfig::begin() {
         defaults(); Serial.println("Sin config.json: perfil Waveshare 8DI/8RO."); return true;
     }
     File file = LittleFS.open("/config.json", "r");
-    if (!file || file.size()>16384) {error="No se puede leer config.json o supera 16 KiB."; return false;}
-    DynamicJsonDocument doc(24576);
+    if (!file || file.size()>32768) {error="No se puede leer config.json o supera 32 KiB."; return false;}
+    DynamicJsonDocument doc(49152);
     if (deserializeJson(doc,file)) {error="JSON de hardware no valido.";return false;}
     return parse(doc.as<JsonVariantConst>(),error);
 }
@@ -19,7 +19,7 @@ bool HardwareConfig::saveJson(JsonVariantConst doc, String& error) const {
     if (!filesystemReady) { error="LittleFS no disponible."; return false; }
     String value;
     const size_t expected = measureJson(doc);
-    if (expected > 16384 || serializeJson(doc, value) != expected || value.length() != expected) {
+    if (expected > 32768 || serializeJson(doc, value) != expected || value.length() != expected) {
         error="Configuracion demasiado grande o memoria insuficiente."; return false;
     }
     // Replace only after a complete, verified write. The live pin map is unchanged.

@@ -13,8 +13,8 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
     HardwareConfig next;
     if (!doc["version"].is<unsigned int>() || doc["version"].as<unsigned int>()!=1 ||
         !doc["modules"].is<JsonArrayConst>() || doc["modules"].size()>16 ||
-        !doc["inputs"].is<JsonArrayConst>() || doc["inputs"].size()>32 ||
-        !doc["outputs"].is<JsonArrayConst>() || doc["outputs"].size()>32) return false;
+        !doc["inputs"].is<JsonArrayConst>() || doc["inputs"].size()>64 ||
+        !doc["outputs"].is<JsonArrayConst>() || doc["outputs"].size()>64) return false;
     for (const char* key : {"inputCount","outputCount"}) if (!doc[key].is<unsigned int>()) return false;
     if (doc["inputCount"].as<unsigned int>()!=doc["inputs"].size() || doc["outputCount"].as<unsigned int>()!=doc["outputs"].size()) return false;
     auto pin = [](JsonVariantConst v, int& dest, bool output) {
@@ -37,10 +37,12 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
             error = "WiFi: SSID, password o hostname no validos.";
             return false;
         }
+    } else if (network == "none") {
+        next.networkType = NetworkType::NONE;
     } else if (network == "ethernet") {
         next.networkType = NetworkType::ETHERNET;
     } else {
-        error = "Red: type debe ser ethernet o wifi.";
+        error = "Red: type debe ser ethernet, wifi o none.";
         return false;
     }
     if (next.networkType == NetworkType::ETHERNET && doc.containsKey("ethernet")) {
@@ -51,11 +53,45 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
     for (int n : {next.sda,next.scl}) {if(pins[n])return false; pins[n]=true;}
     if (next.networkType == NetworkType::ETHERNET)
         for (int n : {next.sclk,next.miso,next.mosi,next.cs}) {if(pins[n])return false; pins[n]=true;}
+    if(doc.containsKey("modbus")) {
+        auto mb=doc["modbus"];
+        const String role=mb["role"] | "off";
+        if(role=="master")next.modbus.role=ModbusRole::MASTER;
+        else if(role=="slave")next.modbus.role=ModbusRole::SLAVE;
+        else if(role!="off")return false;
+        if(next.modbus.role!=ModbusRole::OFF) {
+            error="Modbus: revisar pines, direccion, baud, paridad y tiempos.";
+            if(!pin(mb["tx"],next.modbus.tx,true)||!pin(mb["rx"],next.modbus.rx,false))return false;
+            if(!mb["de"].is<int>())return false;
+            next.modbus.de=mb["de"].as<int>();
+            if(next.modbus.de!=-1 && !pin(mb["de"],next.modbus.de,true))return false;
+            for(int n:{next.modbus.tx,next.modbus.rx,next.modbus.de}) {
+                if(n<0)continue;
+                if(pins[n])return false; pins[n]=true;
+            }
+            if(!mb["baud"].is<unsigned int>())return false;
+            next.modbus.baud=mb["baud"].as<unsigned int>();
+            if(next.modbus.baud!=9600 && next.modbus.baud!=19200 && next.modbus.baud!=38400 && next.modbus.baud!=57600 && next.modbus.baud!=115200)return false;
+            next.modbus.parity=mb["parity"] | "N";
+            if(next.modbus.parity!="N" && next.modbus.parity!="E" && next.modbus.parity!="O")return false;
+            unsigned address=mb["address"] | 1U, timeout=mb["timeoutMs"] | 100U, watchdog=mb["watchdogMs"] | 3000U;
+            if(address<1||address>247||timeout<50||timeout>500||watchdog<1000||watchdog>10000)return false;
+            next.modbus.address=address;next.modbus.timeoutMs=timeout;next.modbus.watchdogMs=watchdog;
+        }
+    }
+    if(next.networkType==NetworkType::NONE && next.modbus.role!=ModbusRole::SLAVE){error="Red none solo se admite en modo esclavo.";return false;}
+    bool slaves[248]={};
     bool addresses[128] = {};
     for (JsonObjectConst m : doc["modules"].as<JsonArrayConst>()) {
         HardwareModule module{};
         String type=m["type"] | "";
         if(type=="gpio") module.type=ModuleType::GPIO;
+        else if(type=="modbus") {
+            if(next.modbus.role!=ModbusRole::MASTER || !m["address"].is<unsigned int>())return false;
+            unsigned address=m["address"].as<unsigned int>();
+            if(address<1||address>247||slaves[address])return false;
+            slaves[address]=true;module.type=ModuleType::MODBUS;module.address=address;
+        }
         else {
             if(type=="tca9554")module.type=ModuleType::TCA9554;
             else if(type=="pcf8574")module.type=ModuleType::PCF8574;
@@ -69,23 +105,27 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
         }
         next.modules.push_back(module);
     }
-    uint64_t used[16] = {};
+    uint64_t used[16] = {}, remoteInputs[16]={};
     for (bool output : {false,true}) {
         for (JsonObjectConst c : doc[output?"outputs":"inputs"].as<JsonArrayConst>()) {
             if(!c["module"].is<unsigned int>() || !c["pin"].is<unsigned int>())return false;
             unsigned m=c["module"].as<unsigned int>(), p=c["pin"].as<unsigned int>();
-            if(m>=next.modules.size() || p>=GPIO_NUM_MAX)return false;
+            if(m>=next.modules.size() || p>=64)return false;
             auto type=next.modules[m].type;
             if(type==ModuleType::GPIO) {
                 int n;
                 if(!pin(c["pin"],n,output) || pins[p])return false;
                 pins[p]=true;
-            } else if(p >= ((type==ModuleType::PCF8574 || type==ModuleType::TCA9554)?8U:16U)) return false;
-            if(used[m] & (uint64_t(1)<<p))return false;
-            used[m] |= uint64_t(1)<<p;
+            } else if(type!=ModuleType::MODBUS && p >= ((type==ModuleType::PCF8574 || type==ModuleType::TCA9554)?8U:16U)) return false;
+            auto& assigned=(type==ModuleType::MODBUS && !output)?remoteInputs[m]:used[m];
+            if(assigned & (uint64_t(1)<<p))return false;
+            assigned |= uint64_t(1)<<p;
             HardwareChannel channel{uint8_t(m),uint8_t(p),false,true};
             if(output) {if(!c["activeLow"].is<bool>())return false; channel.activeLow=c["activeLow"].as<bool>();}
             else {if(!c["pullup"].is<bool>())return false;channel.pullup=c["pullup"].as<bool>();}
+            if(type==ModuleType::MODBUS && (output?channel.activeLow:channel.pullup)){
+                error="Modbus: activeLow y pullup se configuran en el esclavo; usa false en el maestro.";return false;
+            }
             if (!output) {
                 if (type==ModuleType::MCP23017 && (p==7 || p==15)) {error="MCP23017: GPA7 y GPB7 solo admiten salidas.";return false;}
                 if (type==ModuleType::TCA9554 && channel.pullup) {error="TCA9554: pullup debe ser false; usar resistencias externas.";return false;}
@@ -101,10 +141,14 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
 void HardwareConfig::toJson(JsonDocument& doc) const {
     doc.clear();
     doc["version"] = 1;
+    auto mb=doc.createNestedObject("modbus");
+    mb["role"]=modbus.role==ModbusRole::MASTER?"master":modbus.role==ModbusRole::SLAVE?"slave":"off";
+    mb["address"]=modbus.address;mb["tx"]=modbus.tx;mb["rx"]=modbus.rx;mb["de"]=modbus.de;
+    mb["baud"]=modbus.baud;mb["parity"]=modbus.parity;mb["timeoutMs"]=modbus.timeoutMs;mb["watchdogMs"]=modbus.watchdogMs;
     doc["inputCount"] = inputs.size(); doc["outputCount"] = outputs.size();
     doc["i2c"]["sda"] = sda; doc["i2c"]["scl"] = scl;
     auto network = doc.createNestedObject("network");
-    network["type"] = networkType == NetworkType::WIFI ? "wifi" : "ethernet";
+    network["type"] = networkType == NetworkType::WIFI ? "wifi" : networkType == NetworkType::NONE ? "none" : "ethernet";
     if (networkType == NetworkType::WIFI) {
         network["ssid"] = wifiSsid;
         network["password"] = wifiPassword;
@@ -118,6 +162,7 @@ void HardwareConfig::toJson(JsonDocument& doc) const {
         auto item = list.createNestedObject();
         const char* type = "gpio";
         switch (module.type) {
+            case ModuleType::MODBUS: type="modbus"; break;
             case ModuleType::TCA9554: type="tca9554"; break;
             case ModuleType::PCF8574: type="pcf8574"; break;
             case ModuleType::PCF8575: type="pcf8575"; break;

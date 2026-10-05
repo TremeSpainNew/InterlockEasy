@@ -42,7 +42,7 @@ source=r'''
 #include <fstream>
 #include <sstream>
 int main(int argc,char** argv){
- assert(argc==3);std::ifstream file(argv[1]);std::stringstream text;text<<file.rdbuf();
+ assert(argc==4);std::ifstream file(argv[1]);std::stringstream text;text<<file.rdbuf();
  DynamicJsonDocument doc(24576);assert(!deserializeJson(doc,text.str()));String error;
  assert(Hardware.parse(doc.as<JsonVariantConst>(),error));
  assert(Hardware.inputs.size()==8 && Hardware.outputs.size()==8);
@@ -89,13 +89,20 @@ int main(int argc,char** argv){
  std::ifstream mixed(argv[2]);std::stringstream mixedText;mixedText<<mixed.rdbuf();
  assert(!deserializeJson(doc,mixedText.str()));assert(Hardware.parse(doc.as<JsonVariantConst>(),error));
  assert(Hardware.inputs.size()==16 && Hardware.outputs.size()==32);
+ std::ifstream master(argv[3]);std::stringstream masterText;masterText<<master.rdbuf();
+ doc.clear();assert(!deserializeJson(doc,masterText.str()));assert(Hardware.parse(doc.as<JsonVariantConst>(),error));
+ assert(Hardware.inputs.size()==64 && Hardware.outputs.size()==64 && Hardware.modbus.role==ModbusRole::MASTER);
+ doc["modbus"]["tx"]=4;assert(!Hardware.parse(doc.as<JsonVariantConst>(),error));doc["modbus"]["tx"]=17;
+ doc["modules"][3]["address"]=1;assert(!Hardware.parse(doc.as<JsonVariantConst>(),error));doc["modules"][3]["address"]=2;
+ doc["modbus"]["role"]="slave";assert(!Hardware.parse(doc.as<JsonVariantConst>(),error));
+
 }
 '''
 with tempfile.TemporaryDirectory() as directory:
  p=Path(directory)
  for name,value in stubs.items():
   (p/name).parent.mkdir(exist_ok=True,parents=True);(p/name).write_text(value)
- (p/'test.cpp').write_text(source)
+ (p/'test.cpp').write_text('#include "'+str(ROOT/'tests/modbus_stub.h')+'"\n'+source)
  subprocess.run(['c++','-std=c++17',f'-I{p}',f'-I{ROOT/"src"}',f'-I{ROOT/".pio/libdeps/esp32-s3-devkitc-1/ArduinoJson/src"}',str(ROOT/'src/HardwareConfig.cpp'),str(ROOT/'src/HardwareIO.cpp'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
- subprocess.run([str(p/'test'),str(ROOT/'data/config.json'),str(ROOT/'examples/config-mixed-16di-32ro.json')],check=True)
+ subprocess.run([str(p/'test'),str(ROOT/'data/config.json'),str(ROOT/'examples/config-mixed-16di-32ro.json'),str(ROOT/'examples/config-modbus-master-64di-64ro.json')],check=True)
 print('OK: hardware validation, GPIO, TCA9554, PCF8574/75, MCP23017, read/write errors, 32 outputs and partial writes')

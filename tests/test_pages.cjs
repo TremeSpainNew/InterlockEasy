@@ -25,10 +25,10 @@ async function test(page,count=8){
  assert.equal('password' in submitted.mqtt,false);
 }
 (async()=>{
- for(const count of [0,8,32]) for(const page of ['mqtt','inputs','outputs','signals']) await test(page,count);
+ for(const count of [0,8,32,64]) for(const page of ['mqtt','inputs','outputs','signals']) await test(page,count);
  for(const file of fs.readdirSync(dir).filter(f=>f.endsWith('.html'))){
   const html=fs.readFileSync(path.join(dir,file),'utf8');
-  for(const match of html.matchAll(/(?:src|href)="\/([^"#]+)"/g))assert.ok(fs.existsSync(path.join(dir,match[1])),match[1]);
+  for(const match of html.matchAll(/(?:src|href)="\/([^"#]+)"/g))assert.ok(match[1]==='api/backup' ? true : match[1]==='firmware.html' ? fs.existsSync(path.join(dir,'../src/FirmwarePage.h')) : fs.existsSync(path.join(dir,match[1])),match[1]);
  }
  assert.ok(!fs.readFileSync(path.join(dir,'index.html'),'utf8').includes('config-form'));
  console.log('OK: separate pages, automatic load, isolated forms, preservation of other sections and asset links');

@@ -16,6 +16,6 @@ const context=vm.createContext({document:{getElementById:id=>elements[id]},Abort
  assert.equal(posts[0].headers['X-Interlock'],'1');assert.match(elements['hardware-message'].textContent,/Reinicia/);
  fail=true;await submit();assert.match(elements['hardware-message'].textContent,/Mapa no válido/);
  assert.equal(elements['hardware-json'].value,'{"version":1}');assert.equal(elements['hardware-save'].disabled,false);
- elements['hardware-json'].value=JSON.stringify({value:'á'.repeat(9000)});await submit();assert.equal(posts.length,2);assert.match(elements['hardware-message'].textContent,/16 KiB/);
+ elements['hardware-json'].value=JSON.stringify({value:'á'.repeat(18000)});await submit();assert.equal(posts.length,2);assert.match(elements['hardware-message'].textContent,/32 KiB/);
  console.log('OK: editor load, invalid JSON, UTF-8 limit, save headers, restart notice and error recovery');
 })().catch(error=>{console.error(error);process.exitCode=1});

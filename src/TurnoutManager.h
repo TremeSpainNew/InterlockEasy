@@ -5,6 +5,7 @@
 struct TurnoutState {
     int8_t commanded = -1;     // -1 ninguno, 0 normal, 1 invertida
     int8_t feedback = -2;      // -2 desconocido, -1 sin comprobacion, 0 normal, 1 invertida
+    bool drivePending = false;
     bool pulseActive = false;
     uint32_t pulseUntil = 0;
     String lastFeedbackPayload;
