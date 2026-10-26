@@ -141,8 +141,11 @@ la imagen web, sin cargarla: `pio run -t buildfs`. LittleFS se monta sin
 formatear automáticamente; si falta la página, HTTP devuelve 503 con las
 instrucciones de carga y la API de estado sigue disponible.
 
-El servidor atiende una conexión cada vez, limita las cabeceras a 2048 bytes
-y cada conexión a 10 segundos. Admite GET para consulta y POST en
+El servidor procesa hasta cuatro conexiones HTTP simultáneas; acepta en cada
+vuelta todas las conexiones pendientes que caben en esos espacios. Las demás
+quedan pendientes en la pila de red. Cada cliente conserva su estado independiente
+y recibe servicio por turnos. Las cabeceras se limitan a 2048 bytes y las conexiones
+inactivas se cierran por timeout. Admite GET para consulta y POST en
 `/api/config` para guardar. Otras rutas devuelven 404 y otros métodos 405.
 Los mandos manuales desde la web quedan pendientes. El arranque aún espera a DHCP y los intentos de conexión
 MQTT pueden retrasar las actualizaciones HTTP.

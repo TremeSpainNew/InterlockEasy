@@ -1,5 +1,4 @@
 #pragma once
-
 #include <Arduino.h>
 #include <Ethernet.h>
 #include <WiFi.h>
@@ -11,6 +10,32 @@ public:
     void loop();
 
 private:
+    static constexpr uint8_t HTTP_SLOTS = 4;
+    struct HttpSlot {
+        EthernetClient ethernetClient;
+        WiFiClient wifiClient;
+        File file;
+        bool occupied = false;
+        bool responding = false;
+        unsigned long started = 0;
+        String request;
+        String pending;
+        size_t offset = 0;
+        bool readingBody = false;
+        size_t contentLength = 0;
+        String body;
+        bool testRequest = false;
+        bool hardwareRequest = false;
+        bool firmwareRequest = false;
+        bool filesystemRequest = false;
+        size_t firmwareReceived = 0;
+    };
+    HttpSlot httpSlots[HTTP_SLOTS];
+    uint8_t nextHttpSlot = 0;
+    bool firmwareUploadActive = false;
+    void swapHttpSlot(HttpSlot& slot);
+    void processHttpClient();
+
     EthernetServer ethernetServer{80};
     WiFiServer wifiServer{80};
     EthernetClient ethernetClient;
@@ -20,17 +45,13 @@ private:
 
     bool filesystemReady = false;
     bool responding = false;
-
     unsigned long started = 0;
-
     String request;
     String pending;
     size_t offset = 0;
-
     bool readingBody = false;
     size_t contentLength = 0;
     String body;
-
     bool testRequest = false;
     bool hardwareRequest = false;
     bool firmwareRequest = false;
@@ -38,36 +59,19 @@ private:
     size_t firmwareReceived = 0;
     void receiveFirmware();
 
-    // Reinicio automático después de guardar
-    // la configuración de hardware.
     bool restartPending = false;
     unsigned long restartAt = 0;
 
     void close();
     void dispatch();
-
-    void respond(
-        int status,
-        const char* reason,
-        const char* type,
-        const String& body
-    );
-
-    void headers(
-        int status,
-        const char* reason,
-        const char* type,
-        size_t length
-    );
-
+    void respond(int status, const char* reason, const char* type, const String& body);
+    void headers(int status, const char* reason, const char* type, size_t length);
     void status();
     void config(bool secrets=false);
     void saveConfig();
     void testControl();
-
     void hardwareConfig();
     void channelMap();
     void saveHardwareConfig();
 };
-
 extern WebManager Web;
