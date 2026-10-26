@@ -50,9 +50,9 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
             !pin(doc["ethernet"]["miso"],next.miso,false) || !pin(doc["ethernet"]["mosi"],next.mosi,true) || !pin(doc["ethernet"]["cs"],next.cs,true)) return false;
     }
     bool pins[GPIO_NUM_MAX] = {};
-    for (int n : {next.sda,next.scl}) {if(pins[n])return false; pins[n]=true;}
+    for (int n : {next.sda,next.scl}) {if(pins[n]){error="GPIO"+String(n)+" repetido entre buses de comunicacion.";return false;} pins[n]=true;}
     if (next.networkType == NetworkType::ETHERNET)
-        for (int n : {next.sclk,next.miso,next.mosi,next.cs}) {if(pins[n])return false; pins[n]=true;}
+        for (int n : {next.sclk,next.miso,next.mosi,next.cs}) {if(pins[n]){error="GPIO"+String(n)+" repetido entre buses de comunicacion.";return false;} pins[n]=true;}
     if(doc.containsKey("modbus")) {
         auto mb=doc["modbus"];
         const String role=mb["role"] | "off";
@@ -67,7 +67,7 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
             if(next.modbus.de!=-1 && !pin(mb["de"],next.modbus.de,true))return false;
             for(int n:{next.modbus.tx,next.modbus.rx,next.modbus.de}) {
                 if(n<0)continue;
-                if(pins[n])return false; pins[n]=true;
+                if(pins[n]){error="GPIO"+String(n)+" repetido entre buses de comunicacion.";return false;} pins[n]=true;
             }
             if(!mb["baud"].is<unsigned int>())return false;
             next.modbus.baud=mb["baud"].as<unsigned int>();
@@ -114,11 +114,12 @@ bool HardwareConfig::parse(JsonVariantConst doc, String& error) {
             auto type=next.modules[m].type;
             if(type==ModuleType::GPIO) {
                 int n;
-                if(!pin(c["pin"],n,output) || pins[p])return false;
+                if(!pin(c["pin"],n,output))return false;
+                if(pins[p]){error="GPIO"+String(int(p))+" ya esta asignado a otro canal o bus.";return false;}
                 pins[p]=true;
             } else if(type!=ModuleType::MODBUS && p >= ((type==ModuleType::PCF8574 || type==ModuleType::TCA9554)?8U:16U)) return false;
             auto& assigned=(type==ModuleType::MODBUS && !output)?remoteInputs[m]:used[m];
-            if(assigned & (uint64_t(1)<<p))return false;
+            if(assigned & (uint64_t(1)<<p)){error="Modulo "+String(int(m))+", pin "+String(int(p))+" ya esta asignado a otro canal.";return false;}
             assigned |= uint64_t(1)<<p;
             HardwareChannel channel{uint8_t(m),uint8_t(p),false,true};
             if(output) {if(!c["activeLow"].is<bool>())return false; channel.activeLow=c["activeLow"].as<bool>();}

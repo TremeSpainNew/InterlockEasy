@@ -153,20 +153,23 @@ no sustituyen la validación del W5500 y los relés en la placa.
 
 ## Configuración desde el navegador
 
-La navegación se divide en siete páginas:
+La navegación incluye estas páginas:
 
 - `/index.html`: resumen de conexiones, entradas, salidas y señales.
 - `/mqtt.html`: broker y credenciales.
 - `/inputs.html`: configuración de las entradas, JSON, inversión y antirrebote.
 - `/outputs.html`: configuración de salidas independientes.
 - `/signals.html`: focos, relés, aspectos y parpadeo.
+- `/alphanumerics.html`: aspectos de texto plano recibidos por MQTT.
+- `/beacons.html`: balizas vinculadas a señales.
 - `/detection.html`: circuitos de vía lineales y contadores de ejes.
 - `/hardware.html`: red, mapa de canales y expansores.
 
 Cada página de configuración carga sus ajustes automáticamente y permite
 **Recargar configuración**. Al guardar se consulta la configuración actual y se
-sustituye solo la sección editada, conservando las otras secciones. Guardar señales
-también deshabilita los mandos individuales de sus relés asignados. Dos clientes
+sustituye solo la sección editada, conservando las otras secciones. Antes de guardar se comprueban las asignaciones entre todas las secciones,
+sin deshabilitar automáticamente otros usos. Los conflictos indican el canal y
+los elementos implicados. Dos clientes
 que editen simultáneamente la misma sección siguen sujetos al último guardado.
 
 Los recursos `style.css`, `dashboard.js` y `config.js` se sirven localmente, sin
@@ -340,8 +343,8 @@ funcionan. Los aspectos desconocidos y los mensajes inválidos mantienen el últ
 estado. Los mensajes repetidos no reinician la fase de parpadeo.
 
 Los relés de señales habilitadas son exclusivos: no pueden pertenecer a otra
-señal habilitada ni aceptar mandos individuales. El formulario deshabilita MQTT
-individual para esos RO al guardar; la API rechaza conflictos. Los demás relés
+señal habilitada ni aceptar mandos individuales. El formulario y la API rechazan
+conflictos; primero hay que liberar el canal en su configuración anterior. Los demás relés
 siguen disponibles para otras señales o salidas independientes. El dashboard
 muestra la señal, su aspecto y sus focos, e identifica los RO asignados.
 
@@ -363,10 +366,26 @@ al eliminar una señal. El aspecto mostrado es el último mando aceptado, no una
 confirmación óptica o de los contactos físicos.
 
 La API añade `signals`, una lista opcional en configuraciones antiguas. Cada señal
-incluye `enabled`, `name`, `topic`, `jsonPath`, `blinkMs`, `lights` (`name`, `relay`
+incluye `id` (identificador estable), `enabled`, `name`, `topic`, `jsonPath`, `blinkMs`, `lights` (`name`, `relay`
 1..N, hasta 64) y `aspects` (`value`, `on`, `blink`). `on` y `blink` contienen números de foco
 locales 1..N, no números físicos RO. No pueden solaparse. Para eliminar todas las
 señales se envía `signals: []`; omitir el campo si ya hay señales se rechaza.
+En las señales alfanuméricas, `value` es texto libre y se compara exactamente con
+el payload MQTT sin formato JSON (incluidos espacios, acentos y mayúsculas). En
+las señales normales, `jsonPath` selecciona un valor JSON de tipo texto.
+
+La lista opcional `beacons` configura hasta 16 balizas. Cada una referencia una
+señal por su `signalId`, usa uno o dos relés físicos exclusivos y define para cada
+aspecto y relé si queda apagado, fijo o parpadeante. El parpadeo comparte la fase
+y cadencia configurada en la señal. Los relés de balizas habilitadas no se pueden
+usar como salidas MQTT, focos de señales ni relés de desvíos.
+
+Cada foco puede supervisar opcionalmente un INA219: habilita `currentMonitor`,
+indica su dirección I2C decimal (64..79, equivalente a `0x40`..`0x4F`) y el rango
+esperado de corriente en mA (hasta 2000 mA). Las direcciones deben ser únicas.
+Con el relé del foco encendido, el panel muestra la lectura y si está dentro del
+rango; apagado queda en espera. Una lectura fuera del rango marca fallo. La
+supervisión no publica MQTT.
 
 Pruebas: `python3 tests/test_signals.py`, `python3 tests/test_config.py` y
 `node tests/test_config_ui.cjs`. Pendiente comprobar focos y cadencias en la placa.
@@ -425,7 +444,12 @@ La transferencia se escribe por bloques en la partición OTA inactiva; solo al
 completar y validar la imagen se selecciona para el próximo arranque. Si la
 transferencia se interrumpe, se aborta. Tras el éxito, el módulo se reinicia.
 La configuración NVS y LittleFS se conservan. Las páginas web se actualizan
-por separado con `pio run -t uploadfs` cuando corresponda.
+desde la misma página, seleccionando la imagen LittleFS generada con
+`pio run -t buildfs` en `.pio/build/esp32-s3-devkitc-1/littlefs.bin`. Esta
+actualización sustituye todo el contenido de LittleFS, incluida la configuración
+lógica guardada en `/io-config.json`; descarga una copia desde **Hardware** antes
+de instalarla si quieres conservarla. También puedes cargarla por USB con
+`pio run -t uploadfs`.
 
 Para incorporar esta función por primera vez, carga el firmware por USB con
 `pio run -t upload`; después puedes abrir `/firmware.html` directamente.
@@ -451,9 +475,10 @@ Para permitir configuraciones de 64 canales, cuando LittleFS está disponible
 la configuración lógica se guarda mediante archivo temporal y renombrado en
 `/io-config.json`. Se siguen leyendo las antiguas instantáneas NVS como respaldo
 si ese archivo no existe. El guardado no borra el respaldo NVS. Una actualización
-OTA del firmware conserva los dos archivos. **Subir una imagen LittleFS sustituye
-su contenido**, incluida la configuración lógica: conserva una copia antes de
-usar `uploadfs`. La configuración física sigue en `/config.json`.
+OTA del firmware conserva los dos archivos. **Subir una imagen LittleFS desde la
+página web o con `uploadfs` sustituye su contenido**, incluida la configuración
+lógica: conserva una copia antes de actualizarla. La configuración física sigue
+en `/config.json`.
 
 Pruebas RTU simuladas: `python3 tests/test_modbus.py`.
 
@@ -463,3 +488,38 @@ Para restaurarla al cargar LittleFS, colócala junto a `data/config.json` como
 `data/io-config.json` antes de generar la imagen.
 
 Referencia de transporte: [Modbus Serial Line V1.02](https://www.modbus.org/docs/Modbus_over_serial_line_V1_02.pdf).
+
+### Asignación de canales al crear elementos
+
+Los nuevos CV, cuenta-ejes, desvíos y focos proponen los primeros canales libres,
+teniendo en cuenta las E/S MQTT y todas las colecciones, incluidas las
+alfanuméricas y los borradores del editor. Si no quedan canales suficientes, se
+avisa sin crear un elemento con asignaciones repetidas. Los elementos
+deshabilitados no bloquean el guardado de otros usos, pero sus canales se evitan
+al proponer nuevas asignaciones. La comprobación al guardar usa la configuración
+recién consultada; el firmware vuelve a validar antes de persistirla.
+
+El mapa físico de hardware también rechaza pines repetidos entre entradas,
+salidas y buses I2C, Ethernet y Modbus, indicando el GPIO o módulo/pin en conflicto.
+Para instalar estos cambios hay que actualizar el firmware y los archivos de
+LittleFS, incluido `resources.js`.
+
+### Mapa visual y selectores de canales
+
+Las páginas Entradas, Salidas, Señales, Alfanuméricas, Desvíos y Detección
+incluyen el panel desplegable **Mapa de pines y relés**. Muestra cada DI/RO,
+su GPIO o módulo/pin, los elementos que lo utilizan y el número de canales
+en uso. Distingue los conflictos y las asignaciones deshabilitadas. El mapa
+refleja los cambios del formulario antes de guardarlos.
+
+Los campos de canal son selectores con el estado libre/ocupado y el propietario.
+Los canales asignados a otros elementos no se pueden seleccionar; la selección
+actual se conserva visible para poder corregir configuraciones con conflictos.
+En los desvíos, **Sin comprobación** corresponde al valor 0 de las DI de retorno;
+se deben configurar ambas comprobaciones o ninguna.
+
+`GET /api/channels` devuelve solo módulos y canales del hardware **activo**, sin
+credenciales. No lee el archivo de hardware pendiente de reinicio. Si la consulta
+falla, los selectores lógicos siguen funcionando y el mapa avisa de que faltan
+los datos físicos. Las asignaciones de otras páginas se actualizan al recargar;
+al guardar se vuelve a consultar y validar la configuración completa.

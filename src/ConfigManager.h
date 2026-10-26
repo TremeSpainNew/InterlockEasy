@@ -200,6 +200,11 @@ struct SignalLight {
 
     // Numero logico de RO: 1..64.
     uint8_t relay = 1;
+
+    bool currentMonitor = false;
+    uint8_t ina219Address = 0x40;
+    float minCurrentMa = 10;
+    float maxCurrentMa = 2000;
 };
 
 
@@ -214,6 +219,8 @@ struct SignalAspect {
 
 
 struct SignalConfig {
+    uint16_t id = 0;
+    bool numeric = false;
     bool enabled = false;
 
     String name;
@@ -246,6 +253,28 @@ struct SignalConfig {
     }
 };
 
+struct BeaconAspect {
+    String value;
+    uint8_t mask = 0;
+    uint8_t blink = 0;
+};
+
+struct BeaconConfig {
+    bool enabled = false;
+    String name;
+    uint16_t signalId = 0;
+    std::vector<uint8_t> relays;
+    std::vector<BeaconAspect> aspects;
+
+    uint64_t relayMask() const {
+        uint64_t mask = 0;
+        for (uint8_t relay : relays)
+            if (relay >= 1 && relay <= 64)
+                mask |= uint64_t(1) << (relay - 1);
+        return mask;
+    }
+};
+
 
 // ============================================================
 // CONFIG MANAGER
@@ -258,6 +287,7 @@ public:
     MQTTConfig mqtt;
 
     std::vector<SignalConfig> signals;
+    std::vector<BeaconConfig> beacons;
 
     // Deteccion de via.
     //

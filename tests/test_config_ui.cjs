@@ -15,6 +15,7 @@ const context = vm.createContext({document:{getElementById:id=>elements[id], cre
 }});
 const inputs = node => [...(node.name ? [node] : []), ...node.children.flatMap(inputs)];
 (async()=>{
+ vm.runInContext(fs.readFileSync('data/resources.js','utf8'),context);
  vm.runInContext(scripts[1][1],context);
  await elements['load-config'].handlers.click();
  assert.equal(elements['config-form'].hidden,false);
@@ -44,8 +45,16 @@ const inputs = node => [...(node.name ? [node] : []), ...node.children.flatMap(i
  data.signals=[{enabled:true,name:'S1',topic:'s1',jsonPath:'Aspecto',blinkMs:500,lights:[1,2,3,4].map(relay=>({name:'Foco '+relay,relay})),aspects:[{value:'VíaLibre',on:[3],blink:[4]}]}];
  data.outputs[0].enabled=true;
  await elements['load-config'].handlers.click();
- await submit();
+ submitted = undefined; await submit();
+ assert.equal(submitted, undefined);
+ assert.match(elements['config-message'].textContent, /RO1.*salida MQTT/);
+ data.outputs[0].enabled=false;
+ await elements['load-config'].handlers.click(); await submit();
  assert.equal(submitted.signals[0].lights.length,4);
+ assert.equal(submitted.signals[0].lights[0].currentMonitor,false);
+ assert.equal(submitted.signals[0].lights[0].ina219Address,64);
+ assert.equal(submitted.signals[0].lights[0].minCurrentMa,10);
+ assert.equal(submitted.signals[0].lights[0].maxCurrentMa,2000);
  assert.deepEqual(submitted.signals[0].aspects[0],{value:'VíaLibre',on:[3],blink:[4]});
  assert.equal(submitted.outputs[0].enabled,false);
  assert.equal(submitted.signals[0].blinkMs,500);

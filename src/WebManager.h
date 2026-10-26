@@ -34,6 +34,7 @@ private:
     bool testRequest = false;
     bool hardwareRequest = false;
     bool firmwareRequest = false;
+    bool filesystemRequest = false;
     size_t firmwareReceived = 0;
     void receiveFirmware();
 
@@ -65,6 +66,7 @@ private:
     void testControl();
 
     void hardwareConfig();
+    void channelMap();
     void saveHardwareConfig();
 };
 

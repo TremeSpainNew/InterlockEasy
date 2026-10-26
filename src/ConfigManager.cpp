@@ -1,4 +1,5 @@
 #include "ConfigManager.h"
+#include <algorithm>
 #ifdef ARDUINO_ARCH_ESP32
 #include <LittleFS.h>
 #include "HardwareConfig.h"
@@ -156,6 +157,9 @@ void ConfigManager::begin() {
         if (doc.containsKey("signals"))
             resized["signals"].set(doc["signals"]);
 
+        if (doc.containsKey("beacons"))
+            resized["beacons"].set(doc["beacons"]);
+
         if (doc.containsKey("cvs"))
             resized["cvs"].set(doc["cvs"]);
 
@@ -185,6 +189,19 @@ void ConfigManager::begin() {
                     removed = true;
             }
             if (removed) signalList.remove(i - 1);
+        }
+
+        JsonArray beaconList = resized["beacons"].as<JsonArray>();
+        for (size_t i = beaconList.size(); i > 0; --i) {
+            JsonObject beacon = beaconList[i - 1];
+            bool removed = false;
+            for (JsonVariant relay : beacon["relays"].as<JsonArray>())
+                if (relay.as<unsigned int>() > outputs.size()) removed = true;
+            bool linked = false;
+            for (JsonObject signal : signalList)
+                if (signal["id"].as<unsigned int>() ==
+                    beacon["signalId"].as<unsigned int>()) linked = true;
+            if (removed || !linked) beaconList.remove(i - 1);
         }
 
         JsonArray cvList = resized["cvs"].as<JsonArray>();
@@ -404,7 +421,9 @@ void ConfigManager::toJson(
         JsonObject item =
             signalArray.createNestedObject();
 
+        item["id"] = signal.id;
         item["enabled"] = signal.enabled;
+        item["numeric"] = signal.numeric;
         item["name"] = signal.name;
         item["topic"] = signal.topic;
         item["jsonPath"] = signal.jsonPath;
@@ -419,6 +438,10 @@ void ConfigManager::toJson(
 
             entry["name"] = light.name;
             entry["relay"] = light.relay;
+            entry["currentMonitor"] = light.currentMonitor;
+            entry["ina219Address"] = light.ina219Address;
+            entry["minCurrentMa"] = light.minCurrentMa;
+            entry["maxCurrentMa"] = light.maxCurrentMa;
         }
 
         JsonArray aspects =
@@ -452,6 +475,26 @@ void ConfigManager::toJson(
         }
     }
 
+    JsonArray beaconArray = doc.createNestedArray("beacons");
+    for (const auto& beacon : beacons) {
+        JsonObject item = beaconArray.createNestedObject();
+        item["enabled"] = beacon.enabled;
+        item["name"] = beacon.name;
+        item["signalId"] = beacon.signalId;
+        JsonArray relays = item.createNestedArray("relays");
+        for (uint8_t relay : beacon.relays) relays.add(relay);
+        JsonArray aspects = item.createNestedArray("aspects");
+        for (const auto& aspect : beacon.aspects) {
+            JsonObject entry = aspects.createNestedObject();
+            entry["value"] = aspect.value;
+            JsonArray on = entry.createNestedArray("on");
+            JsonArray blink = entry.createNestedArray("blink");
+            for (size_t i = 0; i < beacon.relays.size(); ++i) {
+                if (aspect.mask & (1U << i)) on.add(i + 1);
+                if (aspect.blink & (1U << i)) blink.add(i + 1);
+            }
+        }
+    }
 
     // ========================================================
     // CV TRADICIONALES
@@ -902,6 +945,7 @@ bool ConfigManager::applyJson(
     // ========================================================
 
     std::vector<SignalConfig> nextSignals;
+    uint64_t reservedSignalRelays = 0;
 
     error =
         "Senales: configuracion no valida "
@@ -918,7 +962,8 @@ bool ConfigManager::applyJson(
             return false;
         }
 
-        uint64_t reservedRelays = 0;
+        bool reservedIna219[16] = {};
+        uint16_t generatedSignalId = 1;
 
         for (JsonObjectConst item :
              doc["signals"].as<JsonArrayConst>()) {
@@ -937,6 +982,13 @@ bool ConfigManager::applyJson(
             }
 
             SignalConfig signal;
+            if (item.containsKey("id") &&
+                (!item["id"].is<unsigned int>() ||
+                 item["id"].as<unsigned int>() < 1 ||
+                 item["id"].as<unsigned int>() > 65535)) return false;
+            signal.id = item["id"] | uint16_t(0);
+            if (item.containsKey("numeric") && !item["numeric"].is<bool>()) return false;
+            signal.numeric = item["numeric"] | false;
 
             signal.enabled =
                 item["enabled"].as<bool>();
@@ -949,6 +1001,23 @@ bool ConfigManager::applyJson(
 
             signal.jsonPath =
                 item["jsonPath"].as<String>();
+
+            if (!signal.id) {
+                while (generatedSignalId &&
+                       std::any_of(nextSignals.begin(), nextSignals.end(),
+                           [generatedSignalId](const SignalConfig& previous) {
+                               return previous.id == generatedSignalId;
+                           }))
+                    ++generatedSignalId;
+                if (!generatedSignalId) return false;
+                signal.id = generatedSignalId++;
+            } else if (std::any_of(nextSignals.begin(), nextSignals.end(),
+                           [&signal](const SignalConfig& previous) {
+                               return previous.id == signal.id;
+                           })) {
+                error = "Dos senales no pueden compartir su identificador.";
+                return false;
+            }
 
             if (!topicField(signal.topic) ||
                 signal.name.isEmpty() ||
@@ -1004,6 +1073,49 @@ bool ConfigManager::applyJson(
                 entry.relay =
                     light["relay"].as<uint8_t>();
 
+                if (light.containsKey("currentMonitor") &&
+                    !light["currentMonitor"].is<bool>()) {
+                    return false;
+                }
+                entry.currentMonitor = light["currentMonitor"] | false;
+
+                if (light.containsKey("ina219Address")) {
+                    if (!light["ina219Address"].is<unsigned int>() ||
+                        light["ina219Address"].as<unsigned int>() < 0x40 ||
+                        light["ina219Address"].as<unsigned int>() > 0x4F) {
+                        error = "INA219: la direccion debe estar entre 0x40 y 0x4F.";
+                        return false;
+                    }
+                    entry.ina219Address =
+                        light["ina219Address"].as<uint8_t>();
+                }
+
+                if (light.containsKey("minCurrentMa") &&
+                    !light["minCurrentMa"].is<float>()) {
+                    return false;
+                }
+                if (light.containsKey("maxCurrentMa") &&
+                    !light["maxCurrentMa"].is<float>()) {
+                    return false;
+                }
+                entry.minCurrentMa = light["minCurrentMa"] | 10.0f;
+                entry.maxCurrentMa = light["maxCurrentMa"] | 2000.0f;
+                if (entry.minCurrentMa < 0 ||
+                    entry.maxCurrentMa <= entry.minCurrentMa ||
+                    entry.maxCurrentMa > 2000) {
+                    error = "INA219: el rango de corriente debe ser valido y no superar 2000 mA.";
+                    return false;
+                }
+
+                if (entry.currentMonitor) {
+                    const uint8_t sensorIndex = entry.ina219Address - 0x40;
+                    if (reservedIna219[sensorIndex]) {
+                        error = "Dos focos supervisados no pueden compartir la direccion INA219.";
+                        return false;
+                    }
+                    reservedIna219[sensorIndex] = true;
+                }
+
                 const uint64_t bit =
                     uint64_t(1) << (entry.relay - 1);
 
@@ -1035,8 +1147,7 @@ bool ConfigManager::applyJson(
 
                 for (const auto& previous :
                      signal.aspects) {
-                    if (previous.value == entry.value)
-                        return false;
+                    if (previous.value == entry.value) return false;
                 }
 
                 for (JsonVariantConst light :
@@ -1091,13 +1202,13 @@ bool ConfigManager::applyJson(
             }
 
             if (signal.enabled) {
-                if (mask & reservedRelays) {
+                if (mask & reservedSignalRelays) {
                     error =
                         "Dos senales habilitadas comparten reles.";
                     return false;
                 }
 
-                reservedRelays |= mask;
+                reservedSignalRelays |= mask;
 
                 for (size_t i = 0;
                      i < outputs.size();
@@ -1137,6 +1248,127 @@ bool ConfigManager::applyJson(
         }
     }
 
+    std::vector<BeaconConfig> nextBeacons;
+    uint64_t reservedBeaconRelays = 0;
+    if (doc.containsKey("beacons")) {
+        if (!doc["beacons"].is<JsonArrayConst>() ||
+            doc["beacons"].size() > 16) {
+            error = "Balizas: configuracion no valida (maximo 16).";
+            return false;
+        }
+        for (JsonObjectConst item : doc["beacons"].as<JsonArrayConst>()) {
+            if (!item["enabled"].is<bool>() ||
+                !textField(item["name"], 64) ||
+                !item["signalId"].is<unsigned int>() ||
+                item["signalId"].as<unsigned int>() < 1 ||
+                item["signalId"].as<unsigned int>() > 65535 ||
+                !item["relays"].is<JsonArrayConst>() ||
+                item["relays"].size() < 1 ||
+                item["relays"].size() > 2 ||
+                !item["aspects"].is<JsonArrayConst>()) {
+                error = "Balizas: revisa nombre, senal, reles y aspectos.";
+                return false;
+            }
+            BeaconConfig beacon;
+            beacon.enabled = item["enabled"].as<bool>();
+            beacon.name = item["name"].as<String>();
+            beacon.signalId = item["signalId"].as<uint16_t>();
+            const SignalConfig* linkedSignal = nullptr;
+            for (const auto& signal : nextSignals)
+                if (signal.id == beacon.signalId) linkedSignal = &signal;
+            if (beacon.name.isEmpty() || !linkedSignal ||
+                (beacon.enabled && !linkedSignal->enabled) ||
+                item["aspects"].size() != linkedSignal->aspects.size()) {
+                error = "Baliza: selecciona una senal valida y configura todos sus aspectos.";
+                return false;
+            }
+            uint64_t mask = 0;
+            for (JsonVariantConst relay : item["relays"].as<JsonArrayConst>()) {
+                if (!relay.is<unsigned int>() ||
+                    relay.as<unsigned int>() < 1 ||
+                    relay.as<unsigned int>() > outputs.size()) {
+                    error = "Baliza: cada rele debe estar dentro del hardware configurado.";
+                    return false;
+                }
+                const uint8_t number = relay.as<uint8_t>();
+                const uint64_t bit = uint64_t(1) << (number - 1);
+                if (mask & bit) {
+                    error = "Baliza: no se puede repetir un rele.";
+                    return false;
+                }
+                mask |= bit;
+                beacon.relays.push_back(number);
+            }
+            if (beacon.enabled &&
+                ((reservedBeaconRelays | reservedSignalRelays) & mask)) {
+                error = "Dos elementos habilitados comparten reles.";
+                return false;
+            }
+            if (beacon.enabled) {
+                for (size_t relay = 0; relay < nextOutputs.size(); ++relay)
+                    if ((mask & (uint64_t(1) << relay)) &&
+                        nextOutputs[relay].enabled) {
+                        error = "Deshabilita el mando individual de los reles asignados a una baliza.";
+                        return false;
+                    }
+                reservedBeaconRelays |= mask;
+            }
+            for (JsonObjectConst configuredAspect :
+                 item["aspects"].as<JsonArrayConst>()) {
+                if (!textField(configuredAspect["value"], 64) ||
+                    !configuredAspect["on"].is<JsonArrayConst>() ||
+                    (configuredAspect.containsKey("blink") &&
+                     !configuredAspect["blink"].is<JsonArrayConst>())) {
+                    error = "Baliza: el estado de cada aspecto no es valido.";
+                    return false;
+                }
+                BeaconAspect aspect;
+                aspect.value = configuredAspect["value"].as<String>();
+                bool linkedAspect = false;
+                for (const auto& signalAspect : linkedSignal->aspects)
+                    if (signalAspect.value == aspect.value) linkedAspect = true;
+                if (!linkedAspect || aspect.value.isEmpty()) {
+                    error = "Baliza: los aspectos deben coincidir con los de la senal seleccionada.";
+                    return false;
+                }
+                for (const auto& previous : beacon.aspects)
+                    if (previous.value == aspect.value) {
+                        error = "Baliza: no se puede repetir un aspecto.";
+                        return false;
+                    }
+                for (JsonVariantConst relay :
+                     configuredAspect["on"].as<JsonArrayConst>()) {
+                    if (!relay.is<unsigned int>() || relay.as<unsigned int>() < 1 ||
+                        relay.as<unsigned int>() > beacon.relays.size()) {
+                        error = "Baliza: estado de rele fuera de rango.";
+                        return false;
+                    }
+                    aspect.mask |= uint8_t(1U << (relay.as<unsigned int>() - 1));
+                }
+                if (configuredAspect.containsKey("blink")) {
+                    for (JsonVariantConst relay :
+                         configuredAspect["blink"].as<JsonArrayConst>()) {
+                        if (!relay.is<unsigned int>() || relay.as<unsigned int>() < 1 ||
+                            relay.as<unsigned int>() > beacon.relays.size()) {
+                            error = "Baliza: estado de rele fuera de rango.";
+                            return false;
+                        }
+                        const uint8_t bit = uint8_t(1U << (relay.as<unsigned int>() - 1));
+                        if ((aspect.mask | aspect.blink) & bit) {
+                            error = "Baliza: un rele no puede estar fijo y parpadeante a la vez.";
+                            return false;
+                        }
+                        aspect.blink |= bit;
+                    }
+                }
+                beacon.aspects.push_back(aspect);
+            }
+            nextBeacons.push_back(beacon);
+        }
+    } else if (!beacons.empty()) {
+        error = "Falta la configuracion de balizas.";
+        return false;
+    }
 
     // ========================================================
     // CV TRADICIONALES
@@ -1404,6 +1636,12 @@ bool ConfigManager::applyJson(
                         return false;
                     }
                 }
+                for (const auto& beacon : nextBeacons) {
+                    if (beacon.enabled && (beacon.relayMask() & relayMask)) {
+                        error="Una aguja y una baliza habilitadas comparten reles.";
+                        return false;
+                    }
+                }
                 for (size_t r=0;r<nextOutputs.size();++r) {
                     if ((relayMask&(uint64_t(1)<<r)) && nextOutputs[r].enabled) {
                         error="Deshabilita el mando individual de los reles asignados a una aguja.";
@@ -1611,6 +1849,9 @@ bool ConfigManager::applyJson(
     signals =
         std::move(nextSignals);
 
+    beacons =
+        std::move(nextBeacons);
+
     cvs =
         std::move(nextCvs);
 
@@ -1644,6 +1885,14 @@ bool ConfigManager::relayAssigned(
     for (const auto& signal : signals) {
         if (signal.enabled &&
             (signal.relayMask() &
+             (uint64_t(1) << channel))) {
+            return true;
+        }
+    }
+
+    for (const auto& beacon : beacons) {
+        if (beacon.enabled &&
+            (beacon.relayMask() &
              (uint64_t(1) << channel))) {
             return true;
         }

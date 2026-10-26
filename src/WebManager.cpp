@@ -22,7 +22,7 @@ void WebManager::begin(){
 }
 void WebManager::close(){
     if(firmwareRequest && Update.isRunning())Update.abort();
-    firmwareRequest=false;firmwareReceived=0;
+    firmwareRequest=false;filesystemRequest=false;firmwareReceived=0;
     if(file)file.close();if(client)client->stop();client=nullptr;request="";pending="";offset=0;
     responding=false;readingBody=false;testRequest=false;hardwareRequest=false;contentLength=0;body="";
 }
@@ -57,6 +57,7 @@ void WebManager::status(){
     for(uint8_t i=0;i<NUM_OUTPUTS;++i){
         JsonObject x=outs.createNestedObject();x["channel"]=i+1;x["name"]=Config.outputs[i].name;x["enabled"]=Config.outputs[i].enabled;
         for(const auto& s:Config.signals)if(s.enabled&&(s.relayMask()&(uint64_t(1)<<i)))x["signal"]=s.name;
+        for(const auto& b:Config.beacons)if(b.enabled&&(b.relayMask()&(uint64_t(1)<<i)))x["beacon"]=b.name;
         if(IO.outputReady(i))x["state"]=IO.getOutput(i);else x["state"]=nullptr;
     }
 
@@ -65,7 +66,12 @@ void WebManager::status(){
         const auto& s=Config.signals[i];JsonObject x=signals.createNestedObject();
         x["name"]=s.name;x["enabled"]=s.enabled;x["aspect"]=Signals.aspect(i);x["channel"]=i+1;
         JsonArray aspects=x.createNestedArray("aspects");for(const auto& a:s.aspects)aspects.add(a.value);
-        JsonArray lights=x.createNestedArray("lights");for(const auto& l:s.lights){JsonObject e=lights.createNestedObject();e["name"]=l.name;e["relay"]=l.relay;if(IO.outputReady(l.relay-1))e["state"]=IO.getOutput(l.relay-1);else e["state"]=nullptr;}
+        JsonArray lights=x.createNestedArray("lights");for(size_t j=0;j<s.lights.size();++j){const auto& l=s.lights[j];JsonObject e=lights.createNestedObject();e["name"]=l.name;e["relay"]=l.relay;if(IO.outputReady(l.relay-1))e["state"]=IO.getOutput(l.relay-1);else e["state"]=nullptr;
+            e["currentMonitored"]=Signals.currentMonitored(i,j);e["sensorReady"]=Signals.currentSensorReady(i,j);
+            if(l.currentMonitor){e["currentMinMa"]=l.minCurrentMa;e["currentMaxMa"]=l.maxCurrentMa;}
+            if(Signals.currentReady(i,j)){e["currentMa"]=Signals.currentMa(i,j);e["currentOk"]=Signals.currentOk(i,j);}
+            else{e["currentMa"]=nullptr;e["currentOk"]=nullptr;}
+        }
     }
 
     JsonArray cvs=doc.createNestedArray("cvs");
@@ -103,8 +109,8 @@ void WebManager::dispatch(){
     if(end<0||first<=0||second<=first+1||(line.substring(second+1)!="HTTP/1.1"&&line.substring(second+1)!="HTTP/1.0")){respond(400,"Bad Request","text/plain","Peticion no valida.");return;}
     const String method=line.substring(0,first);String path=request.substring(first+1,second);const int query=path.indexOf('?');if(query>=0)path.remove(query);
 
-    if(method=="POST"&&(path=="/api/config"||path=="/api/test"||path=="/api/hardware"||path=="/api/firmware")){
-        testRequest=path=="/api/test";hardwareRequest=path=="/api/hardware";firmwareRequest=path=="/api/firmware";bool hasLength=false,json=false,binary=false,token=false;
+    if(method=="POST"&&(path=="/api/config"||path=="/api/test"||path=="/api/hardware"||path=="/api/firmware"||path=="/api/filesystem")){
+        testRequest=path=="/api/test";hardwareRequest=path=="/api/hardware";firmwareRequest=path=="/api/firmware"||path=="/api/filesystem";filesystemRequest=path=="/api/filesystem";bool hasLength=false,json=false,binary=false,token=false;
         for(int pos=end+2;pos<int(request.length())-2;){
             const int next=request.indexOf("\r\n",pos);if(next<0)break;String h=request.substring(pos,next);const int colon=h.indexOf(':');
             if(colon<=0){respond(400,"Bad Request","text/plain","Cabecera no valida.");return;}
@@ -115,12 +121,12 @@ void WebManager::dispatch(){
             if(key=="x-interlock")token=value=="1";pos=next+2;
         }
         if(!hasLength||!contentLength){respond(411,"Length Required","text/plain","Falta Content-Length.");return;}
-        const size_t maxSize=firmwareRequest?8388608U:testRequest?512U:(hardwareRequest?32768U:57344U);if(contentLength>maxSize){respond(413,"Content Too Large","text/plain","Configuracion demasiado grande.");return;}
+        const size_t maxSize=firmwareRequest?8388608U:testRequest?512U:(hardwareRequest?32768U:57344U);if(contentLength>maxSize){respond(413,"Content Too Large","text/plain","Archivo demasiado grande.");return;}
         if(!(firmwareRequest?binary:json)){respond(415,"Unsupported Media Type","text/plain","Content-Type no admitido.");return;}
         if(!token){respond(403,"Forbidden","text/plain","Falta X-Interlock: 1.");return;}
         if(firmwareRequest){
             if(restartPending){respond(409,"Conflict","text/plain","Reinicio pendiente.");return;}
-            if(!Update.begin(contentLength,U_FLASH)){
+            if(!Update.begin(contentLength,filesystemRequest?U_SPIFFS:U_FLASH)){
                 firmwareRequest=false;
                 respond(400,"Bad Request","text/plain",String("No se puede iniciar la actualizacion: ")+Update.errorString());return;
             }
@@ -134,9 +140,10 @@ void WebManager::dispatch(){
     if(path=="/api/hardware"){hardwareConfig();return;}
     if(path=="/api/backup"){config(true);return;}
     if(path=="/api/config"){config();return;}
+    if(path=="/api/channels"){channelMap();return;}
     if(path=="/api/status"){status();return;}
 
-    if(path=="/"||path=="/index.html"||path=="/mqtt.html"||path=="/inputs.html"||path=="/outputs.html"||path=="/signals.html"||path=="/detection.html"||path=="/turnouts.html"||path=="/hardware.html"||path=="/hardware.js"||path=="/style.css"||path=="/dashboard.js"||path=="/config.js"||path=="/detection.js"||path=="/turnouts.js"){
+    if(path=="/"||path=="/index.html"||path=="/mqtt.html"||path=="/inputs.html"||path=="/outputs.html"||path=="/alphanumerics.html"||path=="/signals.html"||path=="/beacons.html"||path=="/detection.html"||path=="/turnouts.html"||path=="/hardware.html"||path=="/hardware.js"||path=="/style.css"||path=="/dashboard.js"||path=="/resources.js"||path=="/config.js"||path=="/detection.js"||path=="/turnouts.js"){
         const String asset=path=="/"?String("/index.html"):path;if(filesystemReady)file=LittleFS.open(asset.c_str(),"r");
         if(!file){respond(503,"Service Unavailable","text/plain; charset=utf-8","Interfaz no disponible. Carga LittleFS con: pio run -t uploadfs. API: /api/status");return;}
         const char* type=path.endsWith(".css")?"text/css; charset=utf-8":path.endsWith(".js")?"application/javascript; charset=utf-8":"text/html; charset=utf-8";
@@ -168,7 +175,7 @@ void WebManager::testControl(){
         if(Config.inputAssigned(channel)){respond(409,"Conflict","text/plain; charset=utf-8","Entrada reservada para deteccion.");return;}
         ok=IO.simulateInput(channel,doc["state"].isNull()?-1:(doc["state"].as<bool>()?1:0));
     }else if(type=="relay"&&doc["state"].is<bool>()){
-        if(Config.relayAssigned(channel)){respond(409,"Conflict","text/plain; charset=utf-8","Rele reservado: prueba un aspecto de su senal.");return;}
+        if(Config.relayAssigned(channel)){respond(409,"Conflict","text/plain; charset=utf-8","Rele reservado por una senal, baliza o desvio.");return;}
         if(IO.outputsReady()){IO.setOutput(channel,doc["state"].as<bool>());ok=IO.getOutput(channel)==doc["state"].as<bool>();}
     }else if(type=="signal"&&doc["aspect"].is<const char*>())ok=Signals.testAspect(channel,doc["aspect"].as<String>());
     else {respond(400,"Bad Request","text/plain","Tipo o valor no valido.");return;}
@@ -204,6 +211,32 @@ void WebManager::hardwareConfig(){
     if(filesystemReady&&LittleFS.exists("/config.json")){file=LittleFS.open("/config.json","r");if(!file||file.size()>32768){if(file)file.close();respond(500,"Internal Server Error","text/plain","No se pudo leer config.json.");return;}headers(200,"OK","application/json; charset=utf-8",file.size());return;}
     DynamicJsonDocument doc(49152);Hardware.toJson(doc);if(doc.overflowed()){respond(500,"Internal Server Error","text/plain","Sin memoria.");return;}String value;serializeJson(doc,value);respond(200,"OK","application/json; charset=utf-8",value);
 }
+void WebManager::channelMap(){
+    DynamicJsonDocument doc(16384);
+    JsonArray modules=doc.createNestedArray("modules");
+    for(const auto& module:Hardware.modules){
+        JsonObject item=modules.createNestedObject();
+        const char* type="gpio";
+        switch(module.type){
+            case ModuleType::TCA9554:type="tca9554";break;
+            case ModuleType::PCF8574:type="pcf8574";break;
+            case ModuleType::PCF8575:type="pcf8575";break;
+            case ModuleType::MCP23017:type="mcp23017";break;
+            case ModuleType::MODBUS:type="modbus";break;
+            default:break;
+        }
+        item["type"]=type;item["address"]=module.address;
+    }
+    for(bool output:{false,true}){
+        JsonArray channels=doc.createNestedArray(output?"outputs":"inputs");
+        for(const auto& channel:output?Hardware.outputs:Hardware.inputs){
+            JsonObject item=channels.createNestedObject();
+            item["module"]=channel.module;item["pin"]=channel.pin;
+        }
+    }
+    if(doc.overflowed()){respond(500,"Internal Server Error","text/plain","Sin memoria.");return;}
+    String value;serializeJson(doc,value);respond(200,"OK","application/json; charset=utf-8",value);
+}
 void WebManager::saveHardwareConfig(){
     DynamicJsonDocument doc(49152);if(deserializeJson(doc,body)){respond(400,"Bad Request","text/plain","JSON no valido o demasiado grande.");return;}String error;
     if(!Hardware.saveJson(doc.as<JsonVariantConst>(),error)){respond(400,"Bad Request","text/plain; charset=utf-8",error);return;}
@@ -222,7 +255,7 @@ void WebManager::receiveFirmware(){
     if(!count)return;
     started=millis(); // Upload timeout measures inactivity, not total upload time.
     if(Update.write(buffer,count)!=count){
-        const String error=String("Error al escribir firmware: ")+Update.errorString();
+        const String error=String("Error al escribir la imagen: ")+Update.errorString();
         Update.abort();firmwareRequest=false;readingBody=false;
         respond(400,"Bad Request","text/plain",error);return;
     }
@@ -230,7 +263,7 @@ void WebManager::receiveFirmware(){
     if(firmwareReceived!=contentLength)return;
     const bool ok=Update.end(); // Verifies the complete image before selecting it for boot.
     firmwareRequest=false;readingBody=false;
-    if(!ok){respond(400,"Bad Request","text/plain",String("Firmware no valido: ")+Update.errorString());return;}
-    respond(200,"OK","application/json","{\"updated\":true,\"restarting\":true}");
+    if(!ok){respond(400,"Bad Request","text/plain",String("Imagen no valida: ")+Update.errorString());return;}
+    respond(200,"OK","application/json",filesystemRequest?"{\"updated\":\"filesystem\",\"restarting\":true}":"{\"updated\":\"firmware\",\"restarting\":true}");
     restartPending=true;restartAt=millis()+2000;
 }

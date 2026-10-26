@@ -29,6 +29,7 @@ void setup(){
 
     Config.begin();
     IO.begin();
+    Signals.reload();
     Modbus.begin();
     Detections.reload();
     Turnouts.reload();

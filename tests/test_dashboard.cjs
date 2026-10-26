@@ -6,7 +6,7 @@ const script = fs.readFileSync(path.join(__dirname, '../data/dashboard.js'), 'ut
 const element = () => ({textContent: '', className: '', children: [], replaceChildren() {this.children=[];}, append(...children) {this.children.push(...children);}});
 const elements = Object.fromEntries([...fs.readFileSync(path.join(__dirname,'../data/index.html'),'utf8').matchAll(/id="([^"]+)"/g)].map(m=>[m[1],element()]));
 const channels = Array.from({length: 64}, (_, i) => ({channel: i + 1, name: '', enabled: false, state: false}));
-const data = {inputs: structuredClone(channels), outputs: structuredClone(channels), cvs:[{enabled:true,station:'EST',id:'CV1',input:64,valid:true,occupied:true,topic:'cv/EST/CV1/field_state'}], ethernet: {connected: true, ip: '192.168.1.50'}, mqtt: {connected: false, configured: false}, outputsReady: true};
+const data = {inputs: structuredClone(channels), outputs: structuredClone(channels), cvs:[{enabled:true,station:'EST',id:'CV1',input:64,valid:true,occupied:true,topic:'cv/EST/CV1/field_state'}], signals:[{name:'S1',enabled:true,aspect:'ViaLibre',channel:1,aspects:['ViaLibre'],lights:[{name:'Verde',relay:1,state:true,currentMonitored:true,sensorReady:true,currentMa:12.3,currentMinMa:80,currentMaxMa:120,currentOk:false}]}], ethernet: {connected: true, ip: '192.168.1.50'}, mqtt: {connected: false, configured: false}, outputsReady: true};
 data.inputs[0].name = '<img src=x onerror=alert(1)>';
 data.inputs[0].state = true;
 Object.assign(data.inputs[0], {raw:false, debounceMs:50, filtering:true, publishPending:true});
@@ -39,11 +39,18 @@ async function next() {
   assert.equal(elements.inputs.children[0].children[1].textContent, data.inputs[0].name);
   assert.equal(elements.inputs.children[0].children[2].textContent, 'Activa');
   assert.equal(elements.outputs.children[7].children[2].textContent, 'ON');
+  assert.match(elements.signals.children[0].children[3].textContent,/12.3 mA · fuera de rango \(80.0–120.0 mA\)/);
+  assert.equal(elements.signals.children[0].children[3].className,'state fault');
   assert.equal(elements.mqtt.textContent, 'Sin configurar');
   assert.equal(elements.inputs.children[0].children[5].children.length,3);
   assert.equal(elements.outputs.children[0].children[5].children.length,2);
   assert.equal(elements.outputs.children[0].children[5].children[0].disabled,false);
   assert.match(elements.inputs.children[0].children[4].textContent, /GPIO bajo.*50 ms.*filtrando.*envío pendiente/);
+  data.outputs[0].beacon='B1';
+  await next();
+  assert.equal(elements.outputs.children[0].children[5].children[0].disabled,true);
+  assert.equal(elements.outputs.children[0].children[3].textContent,'Asignado a baliza: B1');
+  delete data.outputs[0].beacon;
   await elements.inputs.children[0].children[5].children[0].onclick();
   await elements.inputs.children[0].children[5].children[2].onclick();
   await elements.outputs.children[7].children[5].children[0].onclick();

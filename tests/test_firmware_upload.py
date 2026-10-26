@@ -3,6 +3,9 @@ from pathlib import Path
 import subprocess, tempfile
 root=Path(__file__).resolve().parents[1]
 source=(root/'src/WebManager.cpp').read_text()
+dispatch=source[source.index('void WebManager::dispatch()'):source.index('void WebManager::config(')]
+assert 'path=="/api/filesystem"' in dispatch
+assert 'Update.begin(contentLength,filesystemRequest?U_SPIFFS:U_FLASH)' in dispatch
 receiver=source[source.index('void WebManager::receiveFirmware()'):]
 cleanup=source[source.index('void WebManager::close()'):source.index('void WebManager::headers(')]
 stub=r'''
@@ -31,9 +34,9 @@ struct Updater {
 struct WebManager {
  Client* client=nullptr;File file;String request,pending,body;
  size_t offset=0,contentLength=0,firmwareReceived=0;
- bool firmwareRequest=true,readingBody=true,responding=false,testRequest=false,hardwareRequest=false,restartPending=false;
- unsigned long started=0,restartAt=0;int status=0;
- void respond(int code,const char*,const char*,const String&){status=code;responding=true;}
+ bool firmwareRequest=true,filesystemRequest=false,readingBody=true,responding=false,testRequest=false,hardwareRequest=false,restartPending=false;
+ unsigned long started=0,restartAt=0;int status=0;String responseBody;
+ void respond(int code,const char*,const char*,const String& value){status=code;responseBody=value;responding=true;}
  void receiveFirmware();void close();
 };
 '''
@@ -44,6 +47,7 @@ int main(){
  web.receiveFirmware();assert(web.firmwareReceived==2048 && !web.restartPending);
  web.receiveFirmware();assert(Update.received==client.data && Update.ended);
  assert(web.status==200 && web.restartPending && web.restartAt==now+2000);
+ assert(web.responseBody.find("\"firmware\"")!=std::string::npos);
  web.close();assert(!Update.aborted && client.stopped);
  Update=Updater{};client=Client{};client.data="partial";web=WebManager{};web.client=&client;web.contentLength=100;
  web.receiveFirmware();web.close();assert(Update.aborted && !Update.ended && !web.restartPending);
@@ -51,6 +55,9 @@ int main(){
  web.receiveFirmware();assert(web.status==400 && Update.aborted && !web.restartPending);
  Update=Updater{};Update.failEnd=true;client=Client{};client.data="bad";web=WebManager{};web.client=&client;web.contentLength=3;
  web.receiveFirmware();assert(web.status==400 && !web.restartPending);
+ Update=Updater{};client=Client{};client.data="fs";web=WebManager{};web.client=&client;web.contentLength=2;web.filesystemRequest=true;
+ web.receiveFirmware();assert(web.status==200 && web.restartPending);
+ assert(web.responseBody.find("\"filesystem\"")!=std::string::npos);
 }
 '''
 with tempfile.TemporaryDirectory() as folder:

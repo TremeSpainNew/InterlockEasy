@@ -1,7 +1,22 @@
 #pragma once
 #include <ArduinoJson.h>
+#include <cmath>
 
 namespace JsonPayload {
+inline bool number(JsonVariantConst value) {
+    return !value.is<bool>() && value.is<double>() && std::isfinite(value.as<double>());
+}
+inline bool numericText(const char* text) {
+    DynamicJsonDocument doc(128);
+    return !deserializeJson(doc, text) && number(doc.as<JsonVariantConst>());
+}
+inline bool sameNumber(const char* a, const char* b) {
+    DynamicJsonDocument left(128), right(128);
+    return !deserializeJson(left, a) && !deserializeJson(right, b) &&
+        number(left.as<JsonVariantConst>()) && number(right.as<JsonVariantConst>()) &&
+        left.as<double>() == right.as<double>();
+}
+
 // Compare structure and values; object key order and whitespace are irrelevant.
 inline bool equal(JsonVariantConst a, JsonVariantConst b) {
     if (a.is<JsonObjectConst>() || b.is<JsonObjectConst>()) {

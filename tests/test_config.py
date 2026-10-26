@@ -136,15 +136,68 @@ int main() {
  d["outputs"][0]["enabled"] = false;
  auto signals = d["signals"].as<JsonArray>();
  auto s = signals.createNestedObject();
- s["name"]="S1"; s["enabled"]=true; s["topic"]="signal/1"; s["jsonPath"]="Aspecto"; s["blinkMs"]=500;
+ s["name"]="S1"; s["enabled"]=true; s["topic"]="signal/1"; s["jsonPath"]="Aspecto"; s["blinkMs"]=500; s["numeric"]=true;
  auto lights=s.createNestedArray("lights");
  for(int i=1;i<=4;++i) {auto l=lights.createNestedObject();l["name"]="Foco";l["relay"]=i;}
+ lights[0]["currentMonitor"]=true;lights[0]["ina219Address"]=0x40;
+ lights[0]["minCurrentMa"]=80;lights[0]["maxCurrentMa"]=120;
  auto aspects=s.createNestedArray("aspects");
- auto a=aspects.createNestedObject(); a["value"]="ViaLibre";a.createNestedArray("on").add(3); a.createNestedArray("blink").add(4);
+ auto a=aspects.createNestedObject(); a["value"]="VíaLibre";a.createNestedArray("on").add(3); a.createNestedArray("blink").add(4);
  assert(Config.applyJson(d.as<JsonVariantConst>(),error));
  ConfigManager signalReboot; signalReboot.begin();
  assert(signalReboot.signals.size()==1 && signalReboot.signals[0].lights.size()==4);
+ assert(signalReboot.signals[0].aspects[0].value=="VíaLibre");
+ assert(signalReboot.signals[0].lights[0].currentMonitor &&
+        signalReboot.signals[0].lights[0].ina219Address==0x40 &&
+        signalReboot.signals[0].lights[0].minCurrentMa==80 &&
+        signalReboot.signals[0].lights[0].maxCurrentMa==120);
  assert(signalReboot.signals[0].aspects[0].mask==4 && signalReboot.signals[0].aspects[0].blink==8);
+ assert(signalReboot.signals[0].id==1);
+ auto beacons=d.createNestedArray("beacons");
+ auto beacon=beacons.createNestedObject();beacon["enabled"]=true;beacon["name"]="B1";beacon["signalId"]=1;
+ beacon.createNestedArray("relays").add(5);beacon["relays"].add(6);
+ auto beaconAspects=beacon.createNestedArray("aspects");
+ auto beaconAspect=beaconAspects.createNestedObject();beaconAspect["value"]="VíaLibre";
+ beaconAspect.createNestedArray("on").add(1);beaconAspect.createNestedArray("blink").add(2);
+ assert(Config.applyJson(d.as<JsonVariantConst>(),error));
+ ConfigManager beaconReboot;beaconReboot.begin();
+ assert(beaconReboot.beacons.size()==1 && beaconReboot.beacons[0].signalId==1);
+ assert(beaconReboot.beacons[0].relays.size()==2 &&
+        beaconReboot.beacons[0].aspects[0].mask==1 &&
+        beaconReboot.beacons[0].aspects[0].blink==2);
+ assert(beaconReboot.relayAssigned(4) && beaconReboot.relayAssigned(5));
+ beacon["relays"][0]=1;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ beacon["relays"][0]=5;
+ s["enabled"]=false;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ s["enabled"]=true;
+ beacon["relays"][1]=5;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ beacon["relays"][1]=6;
+ beaconAspect["blink"][0]=1;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ beaconAspect["blink"][0]=2;
+ beacon["aspects"][0]["value"]="Aspecto ajeno";
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ beacon["aspects"][0]["value"]="VíaLibre";
+ beacon["relays"].remove(1);
+ beaconAspect.remove("blink");
+ assert(Config.applyJson(d.as<JsonVariantConst>(),error));
+ beacon["relays"].add(6);
+ beaconAspect.createNestedArray("blink").add(2);
+ beacon["relays"].add(7);
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ beacon["relays"].remove(2);
+ s["lights"][1]["currentMonitor"]=true;s["lights"][1]["ina219Address"]=0x40;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ s["lights"][1]["currentMonitor"]=false;
+ s["lights"][0]["maxCurrentMa"]=50;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ s["lights"][0]["maxCurrentMa"]=120;
+ s["lights"][0]["ina219Address"]=0x50;
+ assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
+ s["lights"][0]["ina219Address"]=0x40;
  d["outputs"][0]["enabled"]=true;
  assert(!Config.applyJson(d.as<JsonVariantConst>(),error));
  d["outputs"][0]["enabled"]=false;
