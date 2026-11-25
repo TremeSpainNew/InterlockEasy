@@ -292,7 +292,7 @@ const size_t maxSize=firmwareRequest?8388608U:testRequest?512U:(hardwareRequest?
 
 
 
-    if(path=="/"||path=="/index.html"||path=="/mqtt.html"||path=="/inputs.html"||path=="/outputs.html"||path=="/alphanumerics.html"||path=="/signals.html"||path=="/beacons.html"||path=="/detection.html"||path=="/turnouts.html"||path=="/hardware.html"||path=="/hardware.js"||path=="/style.css"||path=="/dashboard.js"||path=="/resources.js"||path=="/config.js"||path=="/detection.js"||path=="/turnouts.js"){
+    if(path=="/"||path=="/index.html"||path=="/mqtt.html"||path=="/inputs.html"||path=="/outputs.html"||path=="/alphanumerics.html"||path=="/signals.html"||path=="/beacons.html"||path=="/detection.html"||path=="/turnouts.html"||path=="/hardware.html"||path=="/hardware.js"||path=="/nav.js"||path=="/style.css"||path=="/dashboard.js"||path=="/resources.js"||path=="/config.js"||path=="/detection.js"||path=="/turnouts.js"){
 
 const String asset=path=="/"?String("/index.html"):path;if(filesystemReady)file=LittleFS.open(asset.c_str(),"r");
 
